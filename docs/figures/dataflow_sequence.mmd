@@ -1,0 +1,19 @@
+sequenceDiagram
+  participant U as 使用者
+  participant M as main.py
+  participant R as face_registry
+  participant Y as yolo/video_tracker
+  participant J as interactions.json
+  participant K as knowledge_graph
+  participant H as HTML 關係圖
+
+  U->>M: register
+  M->>R: 寫入註冊與編碼
+  U->>M: process --video
+  M->>Y: process_video
+  Y->>J: 寫入互動與時間軸
+  U->>M: build-graph
+  M->>K: build_knowledge_graph
+  K->>J: 讀取互動
+  M->>H: draw_relationship_graph
+  U->>H: 瀏覽器開啟

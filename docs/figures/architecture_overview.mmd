@@ -1,0 +1,50 @@
+flowchart TB
+  subgraph input["輸入"]
+    V["教室／實驗影片檔"]
+    P["幼兒註冊照片"]
+  end
+
+  subgraph runtime["本機執行環境"]
+    CLI["main.py 命令列"]
+    ISO["run_yolo_isolated.py\n子行程 YOLO"]
+  end
+
+  subgraph core["核心處理模組"]
+    REG["face_registry\n註冊與編碼"]
+    YT["yolo_tracker\nYOLO+臉辨識"]
+    VT["video_tracker\n純臉部追蹤"]
+    IG["interactions.json\n互動統計與時間軸"]
+  end
+
+  subgraph analysis["圖譜與標籤"]
+    KG["knowledge_graph\nNetworkX"]
+    PR["personality\n代理指標標籤"]
+    RG["relationship_graph\npyvis HTML"]
+  end
+
+  subgraph viz["視覺化 靜態網頁"]
+    HTML["relationship_graph.html"]
+    VIS["vis-network 圖"]
+    CH["Chart.js\n節點 hover"]
+  end
+
+  subgraph storage["資料儲存 檔案系統"]
+    DS[("data/ JSON+影像")]
+  end
+
+  P --> REG
+  V --> CLI
+  CLI --> ISO
+  ISO --> YT
+  CLI --> VT
+  REG --> YT
+  REG --> VT
+  YT --> IG
+  VT --> IG
+  IG --> DS
+  DS --> KG
+  KG --> PR
+  KG --> RG
+  RG --> HTML
+  HTML --> VIS
+  HTML --> CH

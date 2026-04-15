@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ===== 專案資料（隱私 + 大檔）=====
+
+# 影片（全域排除）
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# 全域 data 下的生成/隱私檔案
+data/face_registry.json
+data/face_registry.json.*
+data/interactions.json
+
+# 註冊照片
+data/registered/*.png
+data/registered/*.jpg
+data/registered/*.jpeg
+
+# 合規照片
+data/registered_compliant/
+
+# 擷取結果
+data/extracted/
+
+# 輸出
+data/output/*.png
+data/output/*.jpg
+
+# 圖譜生成物
+data/graph/*.html
+data/graph/*.json
+data/graph/ego/
+
+# ===== Scheme 資料（每個方案的隱私檔案）=====
+data/schemes/*/registered/
+data/schemes/*/face_registry.json
+data/schemes/*/face_registry.json.*
+data/schemes/*/interactions.json
+data/schemes/*/output/
+data/schemes/*/graph/
+
+# 保留 scheme_config.json（小檔、是參數範本）
+!data/schemes/*/scheme_config.json
+
+# ===== 模型快取 =====
+*.onnx
+*.pth
+*.pt
+
+# ===== .gitkeep 不排除 =====
+!.gitkeep
+!data/.gitkeep
+!data/input/.gitkeep
+!data/output/.gitkeep
+!data/registered/.gitkeep
+!data/graph/.gitkeep
+!data/schemes/.gitkeep

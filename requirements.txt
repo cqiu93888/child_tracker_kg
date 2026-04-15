@@ -1,0 +1,22 @@
+# 幼兒辨識追蹤與知識圖譜專案
+opencv-python>=4.8.0
+numpy>=1.24.0
+face-recognition>=1.3.0
+Pillow>=10.0.0
+networkx>=3.0
+pyvis>=0.3.2
+matplotlib>=3.7.0
+pandas>=2.0.0
+
+# YOLO 追蹤（建議安裝，追蹤較穩定）
+ultralytics>=8.0.0
+
+# 可選：安裝後人框 ID 指派改為全域最佳配對（Hungarian），減少兩人交叉時 ID 互換
+scipy>=1.10.0
+
+# InsightFace（ArcFace）臉部辨識引擎，適合口罩/遮擋場景
+insightface>=0.7.3
+onnxruntime>=1.16.0
+
+# Gradio 網頁介面
+gradio>=4.0.0
