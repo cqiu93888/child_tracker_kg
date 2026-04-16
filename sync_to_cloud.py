@@ -3,10 +3,17 @@
 用法：
     python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --secret 你的密碼
 
+也可在本機設定環境變數後只打方案名（減少重複輸入）：
+    set CLOUD_SYNC_URL=https://your-app.onrender.com
+    set SYNC_SECRET=你的密碼
+    python sync_to_cloud.py --scheme 甲班
+
 --url 請填 Render 服務根網址（不要加 /webhook；LINE Webhook 才用 /webhook）。
 
 首次使用前，請先在 Render 上設定好環境變數 SYNC_SECRET，
 然後在本機用相同的 secret 值執行此腳本。
+
+想「不必因主機休眠而反覆 sync」：請在 Render 掛 Persistent Disk 並設 CLOUD_DATA_DIR（見 README）。
 """
 
 import argparse
@@ -22,15 +29,18 @@ def main():
     p.add_argument("--scheme", required=True, help="方案名稱（如：甲班）")
     p.add_argument(
         "--url",
-        required=True,
-        help="Render 服務根網址（如：https://xxx.onrender.com，勿加 /webhook）",
+        default=os.environ.get("CLOUD_SYNC_URL", "").strip(),
+        help="雲端 API 根網址；若省略則讀環境變數 CLOUD_SYNC_URL（勿加 /webhook）",
     )
     p.add_argument("--secret", default=os.environ.get("SYNC_SECRET", "changeme"),
                    help="同步密碼（需與雲端 SYNC_SECRET 環境變數一致）")
     args = p.parse_args()
 
     scheme = args.scheme.strip()
-    base_url = args.url.rstrip("/")
+    base_url = (args.url or "").strip().rstrip("/")
+    if not base_url:
+        print("[ERROR] 請提供 --url 或在環境變數設定 CLOUD_SYNC_URL（Render 服務根網址）。")
+        sys.exit(1)
     if base_url.lower().endswith("/webhook"):
         base_url = base_url[: -len("/webhook")].rstrip("/")
         print("[INFO] 已將 --url 的 /webhook 尾碼移除（同步應使用服務根網址）。")

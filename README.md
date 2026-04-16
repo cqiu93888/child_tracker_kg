@@ -275,6 +275,12 @@ python main.py extract-faces --video data/input/教室.mp4
 python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --secret 你的同步密碼
 ```
 
+若常同步，可在本機一次設定環境變數 `CLOUD_SYNC_URL`、`SYNC_SECRET`，之後只需：
+
+```bash
+python sync_to_cloud.py --scheme 甲班
+```
+
 之後 LINE Bot 就能用最新的圖譜資料回覆使用者了。
 
 ### 不想休眠後一直重跑 sync？用 Render 持久碟
