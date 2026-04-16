@@ -266,6 +266,7 @@ python main.py extract-faces --video data/input/教室.mp4
    ```
    https://your-app.onrender.com/webhook
    ```
+   若曾改為其他主機（例如 Fly），請改回上述 **Render 網址** 並重新驗證。
 
 ### 平時使用
 
@@ -288,10 +289,6 @@ python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --se
 > 本機若**重新建圖、換資料**，仍要再 sync 一次才會更新雲端內容；持久碟只解決「空機重啟資料不見」。
 
 其他做法：改用有內建硬碟的 VPS、或之後把圖譜改存 S3／物件儲存（需改程式）。
-
-### Fly.io（Volume + 持久資料）
-
-本 repo 含 `Dockerfile.cloud`、`fly.toml` 範本；完整指令見 [docs/fly-deploy.md](docs/fly-deploy.md)。
 
 ### LINE Bot 身份驗證
 

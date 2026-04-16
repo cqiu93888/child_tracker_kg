@@ -1,8 +1,0 @@
-# 縮小 fly deploy / docker build 上傳內容（僅 COPY api_cloud 時仍建議保留）
-.git
-**/__pycache__
-data/
-*.mp4
-*.avi
-.venv
-.env
