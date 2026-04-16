@@ -1,5 +1,17 @@
 # Fly.io 部署（api_cloud + 持久 Volume）
 
+## 帳務（重要）
+
+Fly.io 目前多數帳號在**建立 App、使用 Volume 前**，必須在後台綁定**信用卡或購買額度**（防濫用；實際用量仍可能落在免費額度內，以官網為準）。若出現：
+
+`We need your payment information to continue!`
+
+請到 Fly Dashboard → **Billing** 完成設定後，再執行 `fly apps create`。
+
+若無法或不願綁卡，可改：**Render 付費 + Persistent Disk**、**Oracle Cloud 免費 VPS**、**院方／自架主機**。
+
+---
+
 ## 你遇到的錯誤代表什麼
 
 - `fly apps list` 是空的 → 還沒建立 **App**，要先有 app 才能建 volume。
