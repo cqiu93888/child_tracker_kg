@@ -21,9 +21,21 @@ from pyvis.network import Network
 # Config (all from environment variables)
 # ---------------------------------------------------------------------------
 
-LINE_DEFAULT_SCHEME = os.environ.get("LINE_DEFAULT_SCHEME", "甲班")
-LINE_TEACHER_PASSWORD = os.environ.get("LINE_TEACHER_PASSWORD", "teacher123")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
+
+
+def _line_default_scheme() -> str:
+    raw = os.environ.get("LINE_DEFAULT_SCHEME")
+    if raw is None or str(raw).strip() == "":
+        return "甲班"
+    return str(raw).strip()
+
+
+def _line_teacher_password() -> str:
+    raw = os.environ.get("LINE_TEACHER_PASSWORD")
+    if raw is None or str(raw).strip() == "":
+        return "teacher123"
+    return str(raw).strip()
 
 
 def _line_channel_secret() -> str:
@@ -495,7 +507,7 @@ def list_schemes():
 
 @app.get("/api/graph/data", summary="取得知識圖譜 JSON")
 def get_graph_data(scheme: str = Query("", description="方案名稱")):
-    scheme = scheme or LINE_DEFAULT_SCHEME
+    scheme = scheme or _line_default_scheme()
     kg = _load_kg(scheme)
     if kg is None:
         raise HTTPException(404, f"方案「{scheme}」尚未同步圖譜資料。")
@@ -505,7 +517,7 @@ def get_graph_data(scheme: str = Query("", description="方案名稱")):
 @app.get("/api/graph/relationship", response_class=HTMLResponse,
          summary="取得關係圖 HTML")
 def get_relationship_html(scheme: str = Query("", description="方案名稱")):
-    scheme = scheme or LINE_DEFAULT_SCHEME
+    scheme = scheme or _line_default_scheme()
     p = os.path.join(_graph_dir(scheme), "relationship_graph.html")
     if not os.path.isfile(p):
         raise HTTPException(404, "尚未同步關係圖。")
@@ -516,7 +528,7 @@ def get_relationship_html(scheme: str = Query("", description="方案名稱")):
 @app.get("/api/graph/knowledge", response_class=HTMLResponse,
          summary="取得知識圖譜 HTML")
 def get_knowledge_html(scheme: str = Query("", description="方案名稱")):
-    scheme = scheme or LINE_DEFAULT_SCHEME
+    scheme = scheme or _line_default_scheme()
     p = os.path.join(_graph_dir(scheme), "knowledge_graph.html")
     if not os.path.isfile(p):
         raise HTTPException(404, "尚未同步知識圖譜。")
@@ -530,7 +542,7 @@ def get_ego_html(
     scheme: str = Query("", description="方案名稱"),
     name: str = Query(..., description="幼兒名字"),
 ):
-    scheme = scheme or LINE_DEFAULT_SCHEME
+    scheme = scheme or _line_default_scheme()
     kg = _load_kg(scheme)
     if kg is None:
         raise HTTPException(404, "尚未同步圖譜資料。")
@@ -549,7 +561,7 @@ def get_ego_html(
 
 @app.get("/api/graph/summary", summary="取得圖譜純文字摘要")
 def get_graph_summary(scheme: str = Query("", description="方案名稱")):
-    scheme = scheme or LINE_DEFAULT_SCHEME
+    scheme = scheme or _line_default_scheme()
     kg = _load_kg(scheme)
     if kg is None:
         raise HTTPException(404, "尚未同步圖譜資料。")
@@ -683,7 +695,7 @@ async def line_webhook(request: Request):
         text = event["message"]["text"].strip()
         reply_token = event["replyToken"]
         user_id = event["source"].get("userId", "")
-        scheme = LINE_DEFAULT_SCHEME
+        scheme = _line_default_scheme()
         session = _user_sessions.get(user_id)
 
         # --- 登出 ---
@@ -696,7 +708,7 @@ async def line_webhook(request: Request):
 
         # --- 未驗證：嘗試驗證 ---
         if session is None:
-            if text == LINE_TEACHER_PASSWORD:
+            if text == _line_teacher_password():
                 _user_sessions[user_id] = {"role": "teacher"}
                 await _line_reply(reply_token, [
                     {"type": "text", "text": "✅ 老師身份驗證成功！\n\n" + TEACHER_HELP},
