@@ -21,11 +21,17 @@ from pyvis.network import Network
 # Config (all from environment variables)
 # ---------------------------------------------------------------------------
 
-LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
-LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_DEFAULT_SCHEME = os.environ.get("LINE_DEFAULT_SCHEME", "甲班")
 LINE_TEACHER_PASSWORD = os.environ.get("LINE_TEACHER_PASSWORD", "teacher123")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
+
+
+def _line_channel_secret() -> str:
+    return str(os.environ.get("LINE_CHANNEL_SECRET", "") or "").strip()
+
+
+def _line_channel_access_token() -> str:
+    return str(os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "") or "").strip()
 
 
 def _sync_secret_expected() -> str:
@@ -555,21 +561,25 @@ def get_graph_summary(scheme: str = Query("", description="方案名稱")):
 # ---------------------------------------------------------------------------
 
 def _verify_line_signature(body: bytes, signature: str) -> bool:
-    if not LINE_CHANNEL_SECRET:
+    secret = _line_channel_secret()
+    if not secret or not signature:
         return False
-    mac = hmac.new(LINE_CHANNEL_SECRET.encode("utf-8"), body, hashlib.sha256)
+    mac = hmac.new(secret.encode("utf-8"), body, hashlib.sha256)
     return hmac.compare_digest(
         base64.b64encode(mac.digest()).decode("utf-8"), signature
     )
 
 
 async def _line_reply(reply_token: str, messages: list[dict]):
+    token = _line_channel_access_token()
+    if not token:
+        return
     async with httpx.AsyncClient() as client:
         await client.post(
             "https://api.line.me/v2/bot/message/reply",
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+                "Authorization": f"Bearer {token}",
             },
             json={"replyToken": reply_token, "messages": messages},
         )
