@@ -16,12 +16,13 @@
 想「不必因主機休眠而反覆 sync」：請在 Render 掛 Persistent Disk 並設 CLOUD_DATA_DIR（見 README）。
 
 加上 --with-videos 可上傳該方案相關目錄內**全部**追蹤輸出影片；若只要某一檔請用 --video output3.mp4（可重複）。
-影片上傳使用與圖譜相同的 POST /api/sync（multipart），舊版 Render 只要已有 /api/sync 即可，不必依賴 /api/sync-videos。
+影片預設以 POST /api/sync/video-chunk 分塊上傳（避免 Render 502）；小檔亦可手動用 multipart 的 POST /api/sync。
 預設先找 data/schemes/<方案>/output；若為空，會改找 data/output。
 """
 
 import argparse
 import glob
+import io
 import json
 import os
 import sys
@@ -29,6 +30,75 @@ import sys
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 _VIDEO_GLOB = ("*.mp4", "*.mov", "*.webm", "*.avi", "*.mkv")
+
+
+def _upload_videos_in_chunks(httpx_mod, base_url: str, secret: str, scheme: str, paths: list[str]) -> None:
+    """大檔分塊 POST，減少 Render 閘道 502（單請求過大／過久）。"""
+    chunk_url = f"{base_url.rstrip('/')}/api/sync/video-chunk"
+    chunk_mb = int(os.environ.get("SYNC_UPLOAD_CHUNK_MB", "8"))
+    chunk_bytes = max(1, chunk_mb) * 1024 * 1024
+    timeout = float(os.environ.get("SYNC_UPLOAD_CHUNK_TIMEOUT", "180.0"))
+    for local_path in paths:
+        bn = os.path.basename(local_path)
+        sz = os.path.getsize(local_path)
+        print(f"    · {bn}（約 {sz / (1024 * 1024):.1f} MB）分塊上傳（每塊 {chunk_mb} MB）…")
+        r = httpx_mod.post(
+            chunk_url,
+            data={
+                "secret": secret,
+                "scheme": scheme,
+                "filename": bn,
+                "phase": "start",
+            },
+            timeout=timeout,
+        )
+        if r.status_code != 200:
+            print(f"[ERROR] 影片 start 失敗（HTTP {r.status_code}）")
+            print(f"     {r.text}")
+            sys.exit(1)
+        n = 0
+        with open(local_path, "rb") as f:
+            while True:
+                buf = f.read(chunk_bytes)
+                if not buf:
+                    break
+                n += 1
+                bio = io.BytesIO(buf)
+                r = httpx_mod.post(
+                    chunk_url,
+                    data={
+                        "secret": secret,
+                        "scheme": scheme,
+                        "filename": bn,
+                        "phase": "append",
+                    },
+                    files=[
+                        (
+                            "chunk",
+                            (f"part{n}.bin", bio, "application/octet-stream"),
+                        )
+                    ],
+                    timeout=timeout,
+                )
+                if r.status_code != 200:
+                    print(f"[ERROR] 影片第 {n} 塊 append 失敗（HTTP {r.status_code}）")
+                    print(f"     {r.text}")
+                    sys.exit(1)
+        r = httpx_mod.post(
+            chunk_url,
+            data={
+                "secret": secret,
+                "scheme": scheme,
+                "filename": bn,
+                "phase": "finish",
+            },
+            timeout=timeout,
+        )
+        if r.status_code != 200:
+            print(f"[ERROR] 影片 finish 失敗（HTTP {r.status_code}）")
+            print(f"     {r.text}")
+            sys.exit(1)
+        print(f"    [OK] 已寫入雲端：{', '.join(r.json().get('saved', []))}")
 
 
 def _video_paths_in_dir(out_dir: str) -> list[str]:
@@ -186,37 +256,22 @@ def main():
         print("[INFO] 本次僅上傳影片（略過圖譜 JSON）。")
 
     if paths:
-        print(f"\n正在上傳 {len(paths)} 支影片到 {sync_url}（multipart）...")
-        handles: list[object] = []
-        file_parts: list[tuple[str, tuple[str, object, str]]] = []
+        print(
+            f"\n正在上傳 {len(paths)} 支影片（分塊 API，避免單次請求過大導致 Render 502）…"
+        )
         try:
-            for p in paths:
-                bn = os.path.basename(p)
-                fh = open(p, "rb")
-                handles.append(fh)
-                file_parts.append(("files", (bn, fh, "video/mp4")))
-            data = {"secret": secret, "scheme": scheme}
-            r = httpx.post(sync_url, data=data, files=file_parts, timeout=600.0)
-            if r.status_code == 200:
-                result = r.json()
-                print(f"[OK] 影片同步成功：{', '.join(result.get('saved', []))}")
-            else:
-                print(f"[ERROR] 影片同步失敗（HTTP {r.status_code}）")
-                print(f"     {r.text}")
-                print(
-                    "\n若為 415／400：請將 Render 上的服務**重新部署**為含新版 api_cloud 的程式"
-                    "（需支援 multipart 的 POST /api/sync）。"
-                )
-                sys.exit(1)
+            _upload_videos_in_chunks(httpx, base_url, secret, scheme, paths)
+            print("[OK] 影片同步完成。")
+        except httpx.ConnectError:
+            print(f"[ERROR] 無法連線到 {base_url}")
+            sys.exit(1)
         except Exception as e:
             print(f"[ERROR] 影片同步：{e}")
             sys.exit(1)
-        finally:
-            for fh in handles:
-                try:
-                    fh.close()
-                except Exception:
-                    pass
+        print(
+            "\n若仍出現 502：請在 Render 重新部署最新程式，或縮小影片、"
+            "或設定環境變數 SYNC_UPLOAD_CHUNK_MB=4 改小每塊大小。"
+        )
         if not has_json_payload:
             print(f"\n完成！Webhook：{base_url}/webhook")
     elif args.with_videos:

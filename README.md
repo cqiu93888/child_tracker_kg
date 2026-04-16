@@ -289,7 +289,7 @@ python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --se
 python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --secret 你的同步密碼 --video output3.mp4
 ```
 
-（影片經與圖譜相同的 **`POST /api/sync`** 以 multipart 上傳；部署的 `api_cloud` 須為專案內最新版。）
+（影片預設以 **`POST /api/sync/video-chunk`** 分塊上傳，避免單檔過大造成 Render **502**；部署的 `api_cloud` 須為最新版。若網路慢可設環境變數 `SYNC_UPLOAD_CHUNK_MB=4`。）
 
 之後 LINE Bot 就能用最新的圖譜資料回覆使用者了。
 

@@ -557,10 +557,11 @@ def _get_base_url(request: Request) -> str:
 # ---------------------------------------------------------------------------
 
 async def _save_uploaded_output_videos(scheme: str, uploads: list) -> list[str]:
-    """將 multipart 上傳的檔案寫入方案 output 目錄；回傳已儲存的檔名。"""
+    """將 multipart 上傳的檔案串流寫入方案 output 目錄；回傳已儲存的檔名。"""
     od = _output_dir(scheme)
     saved: list[str] = []
     max_bytes = int(os.environ.get("SYNC_VIDEO_MAX_MB", "500")) * 1024 * 1024
+    read_chunk = 1024 * 1024  # 1 MiB，避免整檔進記憶體
     for uf in uploads:
         if not isinstance(uf, StarletteUploadFile):
             continue
@@ -568,17 +569,36 @@ async def _save_uploaded_output_videos(scheme: str, uploads: list) -> list[str]:
         safe = _safe_output_video_name(raw_name)
         if not safe:
             continue
-        body = await uf.read()
-        if len(body) > max_bytes:
-            raise HTTPException(
-                413,
-                f"檔案 {safe} 超過上限（{max_bytes // (1024 * 1024)} MB）",
-            )
         dest = os.path.join(od, safe)
-        with open(dest, "wb") as f:
-            f.write(body)
+        total = 0
+        with open(dest, "wb") as out_f:
+            while True:
+                buf = await uf.read(read_chunk)
+                if not buf:
+                    break
+                total += len(buf)
+                if total > max_bytes:
+                    try:
+                        os.remove(dest)
+                    except OSError:
+                        pass
+                    raise HTTPException(
+                        413,
+                        f"檔案 {safe} 超過上限（{max_bytes // (1024 * 1024)} MB）",
+                    )
+                out_f.write(buf)
+        if total == 0:
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
+            continue
         saved.append(safe)
     return saved
+
+
+def _video_partial_path(scheme: str, safe: str) -> str:
+    return os.path.join(_output_dir(scheme), f"{safe}.syncpart")
 
 
 @app.post("/api/sync", summary="從本機同步資料到雲端（JSON 圖譜／名單，或 multipart 僅上傳影片）")
@@ -652,6 +672,80 @@ async def sync_data(request: Request):
         saved.append("registered_names.json")
 
     return {"message": "同步完成", "scheme": scheme, "saved": saved}
+
+
+@app.post("/api/sync/video-chunk", summary="分塊上傳大影片（降低 Render 502／逾時）")
+async def sync_video_chunk(
+    secret: str = Form(...),
+    scheme: str = Form(...),
+    filename: str = Form(...),
+    phase: str = Form(...),
+    chunk: UploadFile | None = File(default=None),
+):
+    """phase=start 建立暫存；append 附加 chunk；finish 更名為正式檔。"""
+    expected = _sync_secret_expected()
+    if not hmac.compare_digest(str(secret).strip(), expected):
+        raise HTTPException(403, "Invalid sync secret")
+    scheme = str(scheme).strip()
+    if not scheme:
+        raise HTTPException(400, "scheme is required")
+    safe = _safe_output_video_name(str(filename).strip())
+    if not safe:
+        raise HTTPException(400, "不合法的檔名或副檔名")
+    max_bytes = int(os.environ.get("SYNC_VIDEO_MAX_MB", "500")) * 1024 * 1024
+    partial = _video_partial_path(scheme, safe)
+    ph = str(phase).strip().lower()
+    read_chunk = 1024 * 1024
+
+    if ph == "start":
+        with open(partial, "wb"):
+            pass
+        return {"ok": True, "phase": "start", "filename": safe}
+
+    if ph == "append":
+        if not isinstance(chunk, StarletteUploadFile):
+            raise HTTPException(400, "append 階段需要表單欄位 chunk（檔案）")
+        if not os.path.isfile(partial):
+            raise HTTPException(400, "請先送 phase=start")
+        cur = os.path.getsize(partial)
+        with open(partial, "ab") as out_f:
+            while True:
+                buf = await chunk.read(read_chunk)
+                if not buf:
+                    break
+                cur += len(buf)
+                if cur > max_bytes:
+                    try:
+                        os.remove(partial)
+                    except OSError:
+                        pass
+                    raise HTTPException(
+                        413,
+                        f"超過單檔上限（{max_bytes // (1024 * 1024)} MB）",
+                    )
+                out_f.write(buf)
+        return {"ok": True, "phase": "append", "size": os.path.getsize(partial)}
+
+    if ph == "finish":
+        if not os.path.isfile(partial):
+            raise HTTPException(400, "沒有暫存檔，請先 start 並 append")
+        sz = os.path.getsize(partial)
+        if sz == 0:
+            try:
+                os.remove(partial)
+            except OSError:
+                pass
+            raise HTTPException(400, "暫存檔大小為 0，未寫入任何資料")
+        final_path = os.path.join(_output_dir(scheme), safe)
+        try:
+            if os.path.isfile(final_path):
+                os.remove(final_path)
+            os.replace(partial, final_path)
+        except OSError as e:
+            raise HTTPException(500, str(e))
+        return {"message": "同步完成", "scheme": scheme, "saved": [safe]}
+
+    raise HTTPException(400, "phase 必須為 start、append 或 finish")
 
 
 @app.post("/api/sync-videos", summary="（相容舊版）multipart 上傳影片，行為同 POST /api/sync")
