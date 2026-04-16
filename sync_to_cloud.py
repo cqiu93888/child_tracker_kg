@@ -1,7 +1,9 @@
 """將本機建好的圖譜資料同步到 Render 雲端 API。
 
 用法：
-    python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --secret changeme
+    python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --secret 你的密碼
+
+--url 請填 Render 服務根網址（不要加 /webhook；LINE Webhook 才用 /webhook）。
 
 首次使用前，請先在 Render 上設定好環境變數 SYNC_SECRET，
 然後在本機用相同的 secret 值執行此腳本。
@@ -18,13 +20,20 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 def main():
     p = argparse.ArgumentParser(description="同步本機圖譜資料到雲端 API")
     p.add_argument("--scheme", required=True, help="方案名稱（如：甲班）")
-    p.add_argument("--url", required=True, help="Render 雲端 API 網址（如：https://xxx.onrender.com）")
+    p.add_argument(
+        "--url",
+        required=True,
+        help="Render 服務根網址（如：https://xxx.onrender.com，勿加 /webhook）",
+    )
     p.add_argument("--secret", default=os.environ.get("SYNC_SECRET", "changeme"),
                    help="同步密碼（需與雲端 SYNC_SECRET 環境變數一致）")
     args = p.parse_args()
 
     scheme = args.scheme.strip()
     base_url = args.url.rstrip("/")
+    if base_url.lower().endswith("/webhook"):
+        base_url = base_url[: -len("/webhook")].rstrip("/")
+        print("[INFO] 已將 --url 的 /webhook 尾碼移除（同步應使用服務根網址）。")
     secret = args.secret
 
     scheme_safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in scheme)
