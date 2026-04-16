@@ -34,7 +34,7 @@ def main():
     if base_url.lower().endswith("/webhook"):
         base_url = base_url[: -len("/webhook")].rstrip("/")
         print("[INFO] 已將 --url 的 /webhook 尾碼移除（同步應使用服務根網址）。")
-    secret = args.secret
+    secret = str(args.secret).strip()
 
     scheme_safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in scheme)
     scheme_dir = os.path.join(PROJECT_ROOT, "data", "schemes", scheme)

@@ -25,8 +25,15 @@ LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_DEFAULT_SCHEME = os.environ.get("LINE_DEFAULT_SCHEME", "甲班")
 LINE_TEACHER_PASSWORD = os.environ.get("LINE_TEACHER_PASSWORD", "teacher123")
-SYNC_SECRET = os.environ.get("SYNC_SECRET", "changeme")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
+
+
+def _sync_secret_expected() -> str:
+    """每次請求讀取，避免程序啟動時尚未注入 SYNC_SECRET 而永遠用預設值。"""
+    raw = os.environ.get("SYNC_SECRET")
+    if raw is None or str(raw).strip() == "":
+        return "changeme"
+    return str(raw).strip()
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cloud_data")
 
@@ -425,8 +432,9 @@ def _get_base_url(request: Request) -> str:
 @app.post("/api/sync", summary="從本機同步資料到雲端")
 async def sync_data(request: Request):
     body = await request.json()
-    secret = body.get("secret", "")
-    if secret != SYNC_SECRET:
+    secret = str(body.get("secret", "")).strip()
+    expected = _sync_secret_expected()
+    if not hmac.compare_digest(secret, expected):
         raise HTTPException(403, "Invalid sync secret")
 
     scheme = body.get("scheme", "").strip()
