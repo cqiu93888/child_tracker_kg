@@ -14,14 +14,32 @@
 然後在本機用相同的 secret 值執行此腳本。
 
 想「不必因主機休眠而反覆 sync」：請在 Render 掛 Persistent Disk 並設 CLOUD_DATA_DIR（見 README）。
+
+加上 --with-videos 可上傳該方案相關目錄內**全部**追蹤輸出影片；若只要某一檔請用 --video output3.mp4（可重複）。
+影片上傳使用與圖譜相同的 POST /api/sync（multipart），舊版 Render 只要已有 /api/sync 即可，不必依賴 /api/sync-videos。
+預設先找 data/schemes/<方案>/output；若為空，會改找 data/output。
 """
 
 import argparse
+import glob
 import json
 import os
 import sys
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+_VIDEO_GLOB = ("*.mp4", "*.mov", "*.webm", "*.avi", "*.mkv")
+
+
+def _video_paths_in_dir(out_dir: str) -> list[str]:
+    """掃描目錄根層與一層子資料夾內的常見影片副檔名。"""
+    if not os.path.isdir(out_dir):
+        return []
+    found: list[str] = []
+    for pat in _VIDEO_GLOB:
+        found.extend(glob.glob(os.path.join(out_dir, pat)))
+        found.extend(glob.glob(os.path.join(out_dir, "*", pat)))
+    return sorted(set(found))
 
 
 def main():
@@ -34,7 +52,20 @@ def main():
     )
     p.add_argument("--secret", default=os.environ.get("SYNC_SECRET", "changeme"),
                    help="同步密碼（需與雲端 SYNC_SECRET 環境變數一致）")
+    p.add_argument(
+        "--with-videos",
+        action="store_true",
+        help="上傳 output 內全部可辨識的追蹤輸出影片",
+    )
+    p.add_argument(
+        "--video",
+        action="append",
+        default=None,
+        metavar="檔名",
+        help="只上傳指定檔名（如 output3.mp4）；可重複此參數指定多檔",
+    )
     args = p.parse_args()
+    video_names = [str(x).strip() for x in (args.video or []) if str(x).strip()]
 
     scheme = args.scheme.strip()
     base_url = (args.url or "").strip().rstrip("/")
@@ -85,19 +116,35 @@ def main():
     else:
         print(f"[WARN] 找不到 {reg_path}，跳過註冊名單")
 
-    if kg_data is None and not names:
-        print("[ERROR] 沒有任何資料可以同步。請先處理影片、建構圖譜。")
-        sys.exit(1)
+    out_dir = os.path.join(scheme_dir, "output")
+    all_video_paths = _video_paths_in_dir(out_dir)
+    if not all_video_paths:
+        fallback = os.path.join(PROJECT_ROOT, "data", "output")
+        alt = _video_paths_in_dir(fallback)
+        if alt:
+            print(f"\n[INFO] 方案 output 無影片：{out_dir}")
+            print(f"[INFO] 改從全域輸出目錄讀取候選：{fallback}（共 {len(alt)} 支）")
+            all_video_paths = alt
 
-    # --- 上傳 ---
-    payload = {
-        "secret": secret,
-        "scheme": scheme,
-    }
-    if kg_data is not None:
-        payload["knowledge_graph"] = kg_data
-    if names:
-        payload["registered_names"] = names
+    if video_names:
+        want = {os.path.basename(n) for n in video_names}
+        paths = [p for p in all_video_paths if os.path.basename(p) in want]
+        found_names = {os.path.basename(p) for p in paths}
+        missing = want - found_names
+        if missing:
+            print(f"[ERROR] 找不到下列影片（請確認檔名與副檔名）：{', '.join(sorted(missing))}")
+            print(f"       已搜尋：{out_dir} 與 data/output/")
+            sys.exit(1)
+    elif args.with_videos:
+        paths = list(all_video_paths)
+    else:
+        paths = []
+
+    has_json_payload = kg_data is not None or bool(names)
+    if not has_json_payload and not paths:
+        print("[ERROR] 沒有圖譜／名單可同步，也未指定要上傳的影片。")
+        print("       請先建構圖譜，或使用 --with-videos 或 --video 檔名.mp4")
+        sys.exit(1)
 
     try:
         import httpx
@@ -107,29 +154,74 @@ def main():
         import httpx
 
     sync_url = f"{base_url}/api/sync"
-    print(f"\n正在上傳到 {sync_url} ...")
 
-    try:
-        r = httpx.post(sync_url, json=payload, timeout=60)
-        if r.status_code == 200:
-            result = r.json()
-            print(f"[OK] 同步成功！")
-            print(f"     方案：{result.get('scheme')}")
-            print(f"     已儲存：{', '.join(result.get('saved', []))}")
-        else:
-            print(f"[ERROR] 同步失敗（HTTP {r.status_code}）")
-            print(f"     {r.text}")
+    if has_json_payload:
+        payload = {"secret": secret, "scheme": scheme}
+        if kg_data is not None:
+            payload["knowledge_graph"] = kg_data
+        if names:
+            payload["registered_names"] = names
+        print(f"\n正在上傳圖譜／名單到 {sync_url} ...")
+        try:
+            r = httpx.post(sync_url, json=payload, timeout=60)
+            if r.status_code == 200:
+                result = r.json()
+                print("[OK] 同步成功！")
+                print(f"     方案：{result.get('scheme')}")
+                print(f"     已儲存：{', '.join(result.get('saved', []))}")
+            else:
+                print(f"[ERROR] 同步失敗（HTTP {r.status_code}）")
+                print(f"     {r.text}")
+                sys.exit(1)
+        except httpx.ConnectError:
+            print(f"[ERROR] 無法連線到 {base_url}")
+            print("     請確認 Render 服務已啟動，且網址正確。")
             sys.exit(1)
-    except httpx.ConnectError:
-        print(f"[ERROR] 無法連線到 {base_url}")
-        print("     請確認 Render 服務已啟動，且網址正確。")
-        sys.exit(1)
-    except Exception as e:
-        print(f"[ERROR] {e}")
-        sys.exit(1)
+        except Exception as e:
+            print(f"[ERROR] {e}")
+            sys.exit(1)
+        print(f"\n完成！LINE Bot 現在可以使用「{scheme}」方案的圖譜資料。")
+        print(f"Webhook URL：{base_url}/webhook")
+    elif paths:
+        print("[INFO] 本次僅上傳影片（略過圖譜 JSON）。")
 
-    print(f"\n完成！LINE Bot 現在可以使用「{scheme}」方案的圖譜資料。")
-    print(f"Webhook URL：{base_url}/webhook")
+    if paths:
+        print(f"\n正在上傳 {len(paths)} 支影片到 {sync_url}（multipart）...")
+        handles: list[object] = []
+        file_parts: list[tuple[str, tuple[str, object, str]]] = []
+        try:
+            for p in paths:
+                bn = os.path.basename(p)
+                fh = open(p, "rb")
+                handles.append(fh)
+                file_parts.append(("files", (bn, fh, "video/mp4")))
+            data = {"secret": secret, "scheme": scheme}
+            r = httpx.post(sync_url, data=data, files=file_parts, timeout=600.0)
+            if r.status_code == 200:
+                result = r.json()
+                print(f"[OK] 影片同步成功：{', '.join(result.get('saved', []))}")
+            else:
+                print(f"[ERROR] 影片同步失敗（HTTP {r.status_code}）")
+                print(f"     {r.text}")
+                print(
+                    "\n若為 415／400：請將 Render 上的服務**重新部署**為含新版 api_cloud 的程式"
+                    "（需支援 multipart 的 POST /api/sync）。"
+                )
+                sys.exit(1)
+        except Exception as e:
+            print(f"[ERROR] 影片同步：{e}")
+            sys.exit(1)
+        finally:
+            for fh in handles:
+                try:
+                    fh.close()
+                except Exception:
+                    pass
+        if not has_json_payload:
+            print(f"\n完成！Webhook：{base_url}/webhook")
+    elif args.with_videos:
+        print("\n[WARN] --with-videos：找不到可上傳的影片（.mp4 / .mov / .webm / .avi / .mkv）。")
+        print(f"       請確認檔案在：\n         {out_dir}\n       或 data/output/")
 
 
 if __name__ == "__main__":

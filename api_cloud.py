@@ -7,15 +7,16 @@
 import os
 import json
 import hashlib
+import mimetypes
 import hmac
 import base64
-import tempfile
 import unicodedata
 from urllib.parse import quote as _url_quote
 
 import httpx
-from fastapi import FastAPI, Query, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, File, Form, Query, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from pyvis.network import Network
 
 # ---------------------------------------------------------------------------
@@ -37,6 +38,15 @@ def _line_teacher_password() -> str:
     if raw is None or str(raw).strip() == "":
         return "teacher123"
     return str(raw).strip()
+
+
+def _line_professor_password() -> str | None:
+    """若未設定或空白，則不開放「教授」身分登入。"""
+    raw = os.environ.get("LINE_PROFESSOR_PASSWORD")
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    return s or None
 
 
 def _line_channel_secret() -> str:
@@ -101,6 +111,46 @@ def _graph_dir(scheme: str) -> str:
     d = os.path.join(_scheme_dir(scheme), "graph")
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def _output_dir(scheme: str) -> str:
+    d = os.path.join(_scheme_dir(scheme), "output")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+_VIDEO_EXTS = {".mp4", ".mov", ".webm", ".avi", ".mkv"}
+
+
+def _is_staff_role(role: str) -> bool:
+    return role in ("teacher", "professor")
+
+
+def _safe_output_video_name(raw: str) -> str | None:
+    if not raw or not isinstance(raw, str):
+        return None
+    name = raw.strip()
+    if not name or "/" in name or "\\" in name or ".." in name:
+        return None
+    base = os.path.basename(name)
+    if base != name:
+        return None
+    ext = os.path.splitext(base)[1].lower()
+    if ext not in _VIDEO_EXTS:
+        return None
+    return base
+
+
+def _list_output_videos(scheme: str) -> list[str]:
+    d = _output_dir(scheme)
+    if not os.path.isdir(d):
+        return []
+    out: list[str] = []
+    for fn in sorted(os.listdir(d)):
+        p = os.path.join(d, fn)
+        if os.path.isfile(p) and os.path.splitext(fn)[1].lower() in _VIDEO_EXTS:
+            out.append(fn)
+    return out
 
 
 def _load_kg(scheme: str) -> dict | None:
@@ -506,8 +556,57 @@ def _get_base_url(request: Request) -> str:
 # Data sync endpoint
 # ---------------------------------------------------------------------------
 
-@app.post("/api/sync", summary="從本機同步資料到雲端")
+async def _save_uploaded_output_videos(scheme: str, uploads: list) -> list[str]:
+    """將 multipart 上傳的檔案寫入方案 output 目錄；回傳已儲存的檔名。"""
+    od = _output_dir(scheme)
+    saved: list[str] = []
+    max_bytes = int(os.environ.get("SYNC_VIDEO_MAX_MB", "500")) * 1024 * 1024
+    for uf in uploads:
+        if not isinstance(uf, StarletteUploadFile):
+            continue
+        raw_name = uf.filename or ""
+        safe = _safe_output_video_name(raw_name)
+        if not safe:
+            continue
+        body = await uf.read()
+        if len(body) > max_bytes:
+            raise HTTPException(
+                413,
+                f"檔案 {safe} 超過上限（{max_bytes // (1024 * 1024)} MB）",
+            )
+        dest = os.path.join(od, safe)
+        with open(dest, "wb") as f:
+            f.write(body)
+        saved.append(safe)
+    return saved
+
+
+@app.post("/api/sync", summary="從本機同步資料到雲端（JSON 圖譜／名單，或 multipart 僅上傳影片）")
 async def sync_data(request: Request):
+    ct = (request.headers.get("content-type") or "").lower()
+    if "multipart/form-data" in ct:
+        form = await request.form()
+        secret = str(form.get("secret", "")).strip()
+        expected = _sync_secret_expected()
+        if not hmac.compare_digest(secret, expected):
+            raise HTTPException(403, "Invalid sync secret")
+        scheme = str(form.get("scheme", "")).strip()
+        if not scheme:
+            raise HTTPException(400, "scheme is required")
+        uploads = [v for v in form.getlist("files") if isinstance(v, StarletteUploadFile)]
+        if not uploads:
+            raise HTTPException(
+                400,
+                "multipart 請至少上傳一個影片（表單欄位名：files），或改用 JSON 同步圖譜。",
+            )
+        saved = await _save_uploaded_output_videos(scheme, uploads)
+        if not saved:
+            raise HTTPException(
+                400,
+                "沒有寫入任何影片（檔名或副檔名須符合雲端允許的格式）。",
+            )
+        return {"message": "同步完成", "scheme": scheme, "saved": saved}
+
     body = await request.json()
     secret = str(body.get("secret", "")).strip()
     expected = _sync_secret_expected()
@@ -552,6 +651,29 @@ async def sync_data(request: Request):
             json.dump(names, f, ensure_ascii=False)
         saved.append("registered_names.json")
 
+    return {"message": "同步完成", "scheme": scheme, "saved": saved}
+
+
+@app.post("/api/sync-videos", summary="（相容舊版）multipart 上傳影片，行為同 POST /api/sync")
+async def sync_videos(
+    secret: str = Form(...),
+    scheme: str = Form(...),
+    files: list[UploadFile] | None = File(default=None),
+):
+    expected = _sync_secret_expected()
+    if not hmac.compare_digest(str(secret).strip(), expected):
+        raise HTTPException(403, "Invalid sync secret")
+
+    scheme = str(scheme).strip()
+    if not scheme:
+        raise HTTPException(400, "scheme is required")
+
+    uploads = list(files or [])
+    if not uploads:
+        raise HTTPException(400, "請至少上傳一個影片檔（files）")
+    saved = await _save_uploaded_output_videos(scheme, uploads)
+    if not saved:
+        raise HTTPException(400, "沒有寫入任何影片（檔名或副檔名不符合）")
     return {"message": "同步完成", "scheme": scheme, "saved": saved}
 
 
@@ -625,6 +747,25 @@ def get_graph_summary(scheme: str = Query("", description="方案名稱")):
     if kg is None:
         raise HTTPException(404, "尚未同步圖譜資料。")
     return {"scheme": scheme, "summary": _build_full_summary_text(scheme, kg)}
+
+
+@app.get("/api/output/video", summary="串流追蹤輸出影片（檔名須為已同步者）")
+def get_output_video(
+    scheme: str = Query("", description="方案名稱"),
+    file: str = Query(..., description="影片檔名（僅 basename）"),
+):
+    scheme = scheme or _line_default_scheme()
+    safe = _safe_output_video_name(file)
+    if not safe:
+        raise HTTPException(400, "不支援的檔名或副檔名")
+    path = os.path.join(_output_dir(scheme), safe)
+    if not os.path.isfile(path):
+        raise HTTPException(
+            404,
+            "找不到該影片，請在本機執行 sync_to_cloud.py --video 檔名.mp4 或 --with-videos 同步。",
+        )
+    mt, _ = mimetypes.guess_type(path)
+    return FileResponse(path, media_type=mt or "video/mp4", filename=safe)
 
 
 # ---------------------------------------------------------------------------
@@ -708,17 +849,34 @@ def _build_ego_summary_text(scheme: str, child_name: str) -> str:
 # LINE Bot Webhook
 # ---------------------------------------------------------------------------
 
-AUTH_PROMPT = (
-    "🔐 請先驗證身份：\n\n"
-    "老師請輸入密碼\n"
-    "學生/家長請輸入幼兒名字（如：小孩1）"
-)
+def _auth_prompt_text() -> str:
+    lines = [
+        "🔐 請先驗證身份：",
+        "",
+        "老師請輸入密碼",
+    ]
+    if _line_professor_password():
+        lines.append("教授請輸入專用密碼")
+    lines.append("學生／家長請輸入幼兒名字（如：小孩1）")
+    return "\n".join(lines)
+
 
 TEACHER_HELP = (
     "📋 老師可用指令：\n"
     "  「圖譜」→ 查看完整知識圖譜\n"
     "  「名單」→ 查看已註冊幼兒\n"
     "  「方案」→ 列出所有方案\n"
+    "  「影片」→ 追蹤輸出影片連結（須先同步影片）\n"
+    "  「登出」→ 切換身份\n"
+    "  「說明」→ 顯示此說明"
+)
+
+PROFESSOR_HELP = (
+    "📋 教授可用指令：\n"
+    "  「圖譜」→ 查看完整知識圖譜\n"
+    "  「名單」→ 查看已註冊幼兒\n"
+    "  「方案」→ 列出所有方案\n"
+    "  「影片」→ 追蹤輸出影片連結（須先同步影片）\n"
     "  「登出」→ 切換身份\n"
     "  「說明」→ 顯示此說明"
 )
@@ -757,7 +915,7 @@ async def line_webhook(request: Request):
         if text in ("登出", "logout", "切換身份"):
             _user_sessions.pop(user_id, None)
             await _line_reply(reply_token, [
-                {"type": "text", "text": "已登出。\n\n" + AUTH_PROMPT},
+                {"type": "text", "text": "已登出。\n\n" + _auth_prompt_text()},
             ])
             continue
 
@@ -767,6 +925,14 @@ async def line_webhook(request: Request):
                 _user_sessions[user_id] = {"role": "teacher"}
                 await _line_reply(reply_token, [
                     {"type": "text", "text": "✅ 老師身份驗證成功！\n\n" + TEACHER_HELP},
+                ])
+                continue
+
+            prof_pw = _line_professor_password()
+            if prof_pw is not None and text == prof_pw:
+                _user_sessions[user_id] = {"role": "professor"}
+                await _line_reply(reply_token, [
+                    {"type": "text", "text": "✅ 教授身份驗證成功！\n\n" + PROFESSOR_HELP},
                 ])
                 continue
 
@@ -780,7 +946,7 @@ async def line_webhook(request: Request):
                 continue
 
             await _line_reply(reply_token, [
-                {"type": "text", "text": AUTH_PROMPT},
+                {"type": "text", "text": _auth_prompt_text()},
             ])
             continue
 
@@ -789,7 +955,7 @@ async def line_webhook(request: Request):
         child_name = session.get("child_name", "")
 
         if text in ("圖譜", "查圖譜", "知識圖譜", "關係圖"):
-            if role == "teacher":
+            if _is_staff_role(role):
                 summary = _build_full_summary_text(scheme)
                 messages = [{"type": "text", "text": summary}]
                 link_kg = f"{base_url}/api/graph/knowledge?scheme={_url_quote(scheme)}"
@@ -823,9 +989,9 @@ async def line_webhook(request: Request):
             await _line_reply(reply_token, [{"type": "text", "text": msg}])
 
         elif text in ("方案", "查方案", "列表"):
-            if role != "teacher":
+            if not _is_staff_role(role):
                 await _line_reply(reply_token, [
-                    {"type": "text", "text": "此指令僅限老師使用。"},
+                    {"type": "text", "text": "此指令僅限老師或教授使用。"},
                 ])
             else:
                 schemes = _list_schemes()
@@ -835,9 +1001,41 @@ async def line_webhook(request: Request):
                     msg = "尚無任何方案。"
                 await _line_reply(reply_token, [{"type": "text", "text": msg}])
 
+        elif text in ("影片", "追蹤影片", "輸出影片", "video", "videos"):
+            if not _is_staff_role(role):
+                await _line_reply(reply_token, [
+                    {"type": "text", "text": "此指令僅限老師或教授使用。"},
+                ])
+            else:
+                vids = _list_output_videos(scheme)
+                if not vids:
+                    msg = (
+                        f"方案「{scheme}」尚無已同步的追蹤輸出影片。\n"
+                        "請在本機執行：\n"
+                        "python sync_to_cloud.py --scheme <方案> --video 檔名.mp4"
+                    )
+                    await _line_reply(reply_token, [{"type": "text", "text": msg}])
+                else:
+                    lines = [
+                        f"🎬 {scheme} 追蹤輸出影片（共 {len(vids)} 支，請用瀏覽器開啟連結播放）：",
+                        "",
+                    ]
+                    show = vids[:10]
+                    for vn in show:
+                        u = (
+                            f"{base_url}/api/output/video?scheme={_url_quote(scheme)}"
+                            f"&file={_url_quote(vn)}"
+                        )
+                        lines.append(f"· {vn}\n  {u}")
+                    if len(vids) > 10:
+                        lines.append(f"\n… 另有 {len(vids) - 10} 支未列出（可縮短檔名或分批同步）。")
+                    await _line_reply(reply_token, [{"type": "text", "text": "\n".join(lines)}])
+
         elif text in ("說明", "help", "幫助", "指令"):
             if role == "teacher":
                 await _line_reply(reply_token, [{"type": "text", "text": TEACHER_HELP}])
+            elif role == "professor":
+                await _line_reply(reply_token, [{"type": "text", "text": PROFESSOR_HELP}])
             else:
                 await _line_reply(reply_token, [
                     {"type": "text", "text": STUDENT_HELP_TPL.format(name=child_name)},
@@ -846,12 +1044,19 @@ async def line_webhook(request: Request):
         elif text in ("我是誰", "身份", "whoami"):
             if role == "teacher":
                 msg = "👩‍🏫 目前身份：老師"
+            elif role == "professor":
+                msg = "🎓 目前身份：教授"
             else:
                 msg = f"👤 目前身份：{child_name}"
             await _line_reply(reply_token, [{"type": "text", "text": msg}])
 
         else:
-            help_text = TEACHER_HELP if role == "teacher" else STUDENT_HELP_TPL.format(name=child_name)
+            if role == "teacher":
+                help_text = TEACHER_HELP
+            elif role == "professor":
+                help_text = PROFESSOR_HELP
+            else:
+                help_text = STUDENT_HELP_TPL.format(name=child_name)
             await _line_reply(reply_token, [
                 {"type": "text", "text": f"收到：「{text}」\n\n" + help_text},
             ])

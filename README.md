@@ -258,6 +258,7 @@ python main.py extract-faces --video data/input/教室.mp4
    | `LINE_CHANNEL_SECRET` | 你的 LINE Channel Secret |
    | `LINE_CHANNEL_ACCESS_TOKEN` | 你的 LINE Channel Access Token |
    | `LINE_TEACHER_PASSWORD` | 老師密碼（預設 teacher123） |
+   | `LINE_PROFESSOR_PASSWORD`（選用） | 另設一組密碼給「教授」身分；未設定則無法以教授登入 |
    | `SYNC_SECRET` | 自訂同步密碼（本機同步時要用） |
    | `LINE_DEFAULT_SCHEME` | 預設方案名稱（如：甲班） |
    | `CLOUD_DATA_DIR`（選用） | 見下方「持久碟」，可避免休眠後資料被清空 |
@@ -276,6 +277,20 @@ python main.py extract-faces --video data/input/教室.mp4
 python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --secret 你的同步密碼
 ```
 
+若要讓老師／教授在 LINE 用「**影片**」取得**追蹤輸出影片**連結，需一併上傳本機輸出影片（預設掃描 `data/schemes/<方案>/output`；若為空會改掃 `data/output`，因未加 `--scheme` 時輸出會在那裡）。檔案可能很大，上傳較久：
+
+```bash
+python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --secret 你的同步密碼 --with-videos
+```
+
+只上傳單一輸出檔（例如 `data/output/output3.mp4`）：
+
+```bash
+python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --secret 你的同步密碼 --video output3.mp4
+```
+
+（影片經與圖譜相同的 **`POST /api/sync`** 以 multipart 上傳；部署的 `api_cloud` 須為專案內最新版。）
+
 之後 LINE Bot 就能用最新的圖譜資料回覆使用者了。
 
 ### 不想休眠後一直重跑 sync？用 Render 持久碟
@@ -292,9 +307,12 @@ python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --se
 
 ### LINE Bot 身份驗證
 
-- 老師輸入密碼 → 可查看完整圖譜
-- 學生/家長輸入幼兒名字 → 只能查看該幼兒的個人圖譜
+- 老師輸入密碼 → 可查看完整圖譜、方案列表、追蹤輸出影片連結（須已 `--with-videos` 同步）
+- 教授輸入 `LINE_PROFESSOR_PASSWORD`（須先在 Render 設定）→ 權限與老師相同（含「影片」）
+- 學生／家長輸入幼兒名字 → 只能查看該幼兒的個人圖譜
 - 輸入「登出」可切換身份
+
+> 圖譜與影片連結為**知道網址即可開啟**（與多數輕量部署相同）。若需更嚴格存取控制，需另行加驗證（例如簽名網址）。
 
 ---
 
