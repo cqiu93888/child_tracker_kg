@@ -260,6 +260,7 @@ python main.py extract-faces --video data/input/教室.mp4
    | `LINE_TEACHER_PASSWORD` | 老師密碼（預設 teacher123） |
    | `SYNC_SECRET` | 自訂同步密碼（本機同步時要用） |
    | `LINE_DEFAULT_SCHEME` | 預設方案名稱（如：甲班） |
+   | `CLOUD_DATA_DIR`（選用） | 見下方「持久碟」，可避免休眠後資料被清空 |
 
 4. **在 LINE Developers 設定 Webhook URL**：
    ```
@@ -275,6 +276,18 @@ python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --se
 ```
 
 之後 LINE Bot 就能用最新的圖譜資料回覆使用者了。
+
+### 不想休眠後一直重跑 sync？用 Render 持久碟
+
+免費 Web Service 的檔案系統在**休眠／重啟**後可能清空，`cloud_data` 會不見，LINE 就讀不到圖譜。做法：
+
+1. 在 Render 服務上新增 **Persistent Disk**（持久碟；多為付費方案才有），掛載路徑例如：`/var/data`
+2. 環境變數新增 **`CLOUD_DATA_DIR=/var/data`**（與掛載路徑一致）
+3. 重新部署後再執行 **一次** `sync_to_cloud.py` 寫入資料；之後休眠醒來，檔案仍會在碟上，**不必因為主機重啟而反覆 sync**
+
+> 本機若**重新建圖、換資料**，仍要再 sync 一次才會更新雲端內容；持久碟只解決「空機重啟資料不見」。
+
+其他做法：改用有內建硬碟的 VPS、或之後把圖譜改存 S3／物件儲存（需改程式）。
 
 ### LINE Bot 身份驗證
 

@@ -54,7 +54,9 @@ def _sync_secret_expected() -> str:
         return "changeme"
     return str(raw).strip()
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cloud_data")
+# 圖譜／名單檔案根目錄：設 CLOUD_DATA_DIR 可指向 Render Persistent Disk，避免休眠清空
+_ov = os.environ.get("CLOUD_DATA_DIR", "").strip()
+DATA_DIR = _ov if _ov else os.path.join(os.path.dirname(os.path.abspath(__file__)), "cloud_data")
 
 # Ego graph defaults (mirrors config.py)
 EGO_MIN_COOCCURRENCE = 3
