@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import base64
 import tempfile
+import unicodedata
 from urllib.parse import quote as _url_quote
 
 import httpx
@@ -121,6 +122,62 @@ def _list_schemes() -> list[str]:
     if not os.path.isdir(d):
         return []
     return sorted(x for x in os.listdir(d) if os.path.isdir(os.path.join(d, x)))
+
+
+def _norm_text(s: str) -> str:
+    """LINE 輸入與檔案內名字比對用（去空白、Unicode NFC）。"""
+    return unicodedata.normalize("NFC", str(s or "").strip())
+
+
+def _has_synced_graph(scheme: str) -> bool:
+    return os.path.isfile(os.path.join(_graph_dir(scheme), "knowledge_graph.json"))
+
+
+def _scheme_for_line_data() -> str:
+    """若 LINE_DEFAULT_SCHEME 指到不存在的資料夾，改選實際已同步過圖譜的方案。"""
+    primary = _line_default_scheme()
+    if _has_synced_graph(primary):
+        return primary
+    for d in _list_schemes():
+        if _has_synced_graph(d):
+            return d
+    return primary
+
+
+def _load_registered_names_safe(scheme: str) -> list[str]:
+    raw = _load_registered_names(scheme)
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for n in raw:
+        if isinstance(n, str) and n.strip():
+            out.append(n.strip())
+    return out
+
+
+def _student_name_lookup(scheme: str) -> dict[str, str]:
+    """正規化名 -> 標準顯示名；來源：registered_names.json + 知識圖譜節點（避免只同步到圖譜、或名單檔遺失時無法登入）。"""
+    lookup: dict[str, str] = {}
+    for s in _load_registered_names_safe(scheme):
+        k = _norm_text(s)
+        if k and k not in lookup:
+            lookup[k] = s
+    kg = _load_kg(scheme)
+    if kg:
+        for node in kg.get("nodes", []):
+            nid = node.get("id") or node.get("label")
+            if isinstance(nid, str):
+                s = nid.strip()
+                if not s:
+                    continue
+                k = _norm_text(s)
+                if k and k not in lookup:
+                    lookup[k] = s
+    return lookup
+
+
+def _display_name_list(scheme: str) -> list[str]:
+    return sorted(set(_student_name_lookup(scheme).values()))
 
 
 # ---------------------------------------------------------------------------
@@ -597,10 +654,6 @@ async def _line_reply(reply_token: str, messages: list[dict]):
         )
 
 
-def _get_registered_names_cloud(scheme: str) -> set[str]:
-    return set(_load_registered_names(scheme))
-
-
 def _build_full_summary_text(scheme: str, kg: dict | None = None) -> str:
     if kg is None:
         kg = _load_kg(scheme)
@@ -695,7 +748,7 @@ async def line_webhook(request: Request):
         text = event["message"]["text"].strip()
         reply_token = event["replyToken"]
         user_id = event["source"].get("userId", "")
-        scheme = _line_default_scheme()
+        scheme = _scheme_for_line_data()
         session = _user_sessions.get(user_id)
 
         # --- 登出 ---
@@ -715,12 +768,12 @@ async def line_webhook(request: Request):
                 ])
                 continue
 
-            registered = _get_registered_names_cloud(scheme)
-            if text in registered:
-                _user_sessions[user_id] = {"role": "student", "child_name": text}
-                help_text = STUDENT_HELP_TPL.format(name=text)
+            child_canon = _student_name_lookup(scheme).get(_norm_text(text))
+            if child_canon:
+                _user_sessions[user_id] = {"role": "student", "child_name": child_canon}
+                help_text = STUDENT_HELP_TPL.format(name=child_canon)
                 await _line_reply(reply_token, [
-                    {"type": "text", "text": f"✅ 歡迎，{text}！\n\n" + help_text},
+                    {"type": "text", "text": f"✅ 歡迎，{child_canon}！\n\n" + help_text},
                 ])
                 continue
 
@@ -759,11 +812,11 @@ async def line_webhook(request: Request):
                 await _line_reply(reply_token, messages)
 
         elif text in ("名單", "查名單", "註冊"):
-            names = _load_registered_names(scheme)
+            names = _display_name_list(scheme)
             if not names:
-                msg = f"方案「{scheme}」尚無註冊資料。"
+                msg = f"方案「{scheme}」尚無註冊／圖譜名單。請在本機執行 sync_to_cloud.py 同步。"
             else:
-                msg = f"📋 {scheme} 已註冊 {len(names)} 人：\n"
+                msg = f"📋 {scheme} 可驗證身分的名字（共 {len(names)} 人）：\n"
                 msg += "\n".join(f"  · {n}" for n in names)
             await _line_reply(reply_token, [{"type": "text", "text": msg}])
 
