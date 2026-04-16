@@ -674,7 +674,14 @@ async def sync_data(request: Request):
     return {"message": "同步完成", "scheme": scheme, "saved": saved}
 
 
+@app.get("/api/sync/video-chunk", summary="探測分塊上傳 API 是否已部署")
+@app.get("/api/sync-video-chunk", summary="（別名）探測分塊上傳 API")
+def sync_video_chunk_probe():
+    return {"video_chunk": True, "post": "secret, scheme, filename, phase=start|append|finish"}
+
+
 @app.post("/api/sync/video-chunk", summary="分塊上傳大影片（降低 Render 502／逾時）")
+@app.post("/api/sync-video-chunk", summary="（路徑別名）同上")
 async def sync_video_chunk(
     secret: str = Form(...),
     scheme: str = Form(...),
@@ -1164,4 +1171,8 @@ async def line_webhook(request: Request):
 
 @app.get("/", summary="健康檢查")
 def health():
-    return {"status": "ok", "service": "child_tracker_kg cloud API"}
+    return {
+        "status": "ok",
+        "service": "child_tracker_kg cloud API",
+        "video_chunk_probe": "/api/sync/video-chunk",
+    }

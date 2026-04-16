@@ -289,7 +289,7 @@ python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --se
 python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --secret 你的同步密碼 --video output3.mp4
 ```
 
-（影片預設以 **`POST /api/sync/video-chunk`** 分塊上傳，避免單檔過大造成 Render **502**；部署的 `api_cloud` 須為最新版。若網路慢可設環境變數 `SYNC_UPLOAD_CHUNK_MB=4`。）
+（影片預設以 **`POST /api/sync/video-chunk`** 分塊上傳；部署的 `api_cloud` 須為最新版。若本機出現 **404**，代表 Render 尚未部署到含此 API 的 commit，請 **Manual Deploy**。部署後可用瀏覽器開 `https://你的網址/api/sync/video-chunk`，應看到 JSON 含 `video_chunk: true`。若網路慢可設 `SYNC_UPLOAD_CHUNK_MB=4`；進階可設 `CLOUD_SYNC_VIDEO_CHUNK_URL` 覆寫端點。）
 
 之後 LINE Bot 就能用最新的圖譜資料回覆使用者了。
 

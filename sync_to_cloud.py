@@ -31,10 +31,44 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 _VIDEO_GLOB = ("*.mp4", "*.mov", "*.webm", "*.avi", "*.mkv")
 
+_CHUNK_PATHS = ("/api/sync/video-chunk", "/api/sync-video-chunk")
+
+
+def _resolve_video_chunk_url(httpx_mod, base_url: str) -> str:
+    """回傳可用的分塊上傳 POST 基底 URL；若雲端為舊版則回傳空字串。"""
+    override = (os.environ.get("CLOUD_SYNC_VIDEO_CHUNK_URL") or "").strip().rstrip("/")
+    if override:
+        return override
+    root = base_url.rstrip("/")
+    for path in _CHUNK_PATHS:
+        url = root + path
+        try:
+            g = httpx_mod.get(url, timeout=25.0)
+        except Exception:
+            continue
+        if g.status_code == 200:
+            try:
+                data = g.json()
+            except Exception:
+                data = {}
+            if data.get("video_chunk") is True:
+                return url
+        # 僅註冊 POST、未加 GET 探測的舊版：GET 會 405，仍視為端點存在
+        if g.status_code == 405:
+            return url
+    return ""
+
 
 def _upload_videos_in_chunks(httpx_mod, base_url: str, secret: str, scheme: str, paths: list[str]) -> None:
     """大檔分塊 POST，減少 Render 閘道 502（單請求過大／過久）。"""
-    chunk_url = f"{base_url.rstrip('/')}/api/sync/video-chunk"
+    chunk_url = _resolve_video_chunk_url(httpx_mod, base_url)
+    if not chunk_url:
+        print("[ERROR] 雲端找不到「分塊上傳」API（GET /api/sync/video-chunk 回傳 404）。")
+        print("        代表 Render 上跑的還不是 GitHub 最新版（尚未含 video-chunk）。")
+        print("        請到：Render Dashboard → 你的 Web Service → Manual Deploy → Deploy latest commit")
+        print("        並確認連線的 Branch 為 main、Build 成功後再重跑本指令。")
+        sys.exit(1)
+    print(f"[INFO] 分塊上傳端點：{chunk_url}")
     chunk_mb = int(os.environ.get("SYNC_UPLOAD_CHUNK_MB", "8"))
     chunk_bytes = max(1, chunk_mb) * 1024 * 1024
     timeout = float(os.environ.get("SYNC_UPLOAD_CHUNK_TIMEOUT", "180.0"))
