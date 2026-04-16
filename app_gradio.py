@@ -195,7 +195,6 @@ def build_app() -> gr.Blocks:
 
     with gr.Blocks(
         title="幼兒辨識追蹤與知識圖譜",
-        theme=gr.themes.Soft(),
     ) as app:
         gr.Markdown("# 幼兒辨識追蹤與知識圖譜系統")
         gr.Markdown("上傳照片註冊幼兒 → 處理影片 → 建構關係圖，全部在瀏覽器完成。")
@@ -310,7 +309,7 @@ if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser()
     p.add_argument("--share", action="store_true", help="產生公開分享連結")
-    p.add_argument("--port", type=int, default=7860)
+    p.add_argument("--port", type=int, default=7870)
     args = p.parse_args()
 
     ensure_dirs()
