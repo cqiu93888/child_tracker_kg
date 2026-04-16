@@ -1,0 +1,6 @@
+# 雲端版 LINE Bot API 依賴（部署到 Render 使用）
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+httpx>=0.24.0
+networkx>=3.0
+pyvis>=0.3.2

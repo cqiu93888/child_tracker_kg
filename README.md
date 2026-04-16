@@ -144,7 +144,12 @@ child_tracker_kg/
 ├── appearance_features.py# 外觀特徵輔助
 ├── extract_faces.py      # 從影片擷取臉圖
 ├── diagnose_tracking.py  # 追蹤診斷工具
+├── api.py                # REST API（本機版）
+├── api_cloud.py          # REST API（Render 雲端版，不需 ML 套件）
+├── sync_to_cloud.py      # 本機→雲端資料同步腳本
 ├── requirements.txt
+├── requirements-cloud.txt# 雲端版輕量依賴
+├── render.yaml           # Render 部署設定
 ├── README.md
 ├── docs/                 # 技術文件
 ├── lib/                  # 前端視覺化庫 (vis.js 等)
@@ -223,6 +228,59 @@ python main.py extract-faces --video data/input/教室.mp4
 - **活躍型**：在畫面中移動或出現的次數多
 
 標籤寫入知識圖譜，並在關係圖中一併顯示。
+
+---
+
+## LINE Bot 雲端部署（Render）
+
+不需要一直開電腦，把 LINE Bot 部署到免費雲端即可 24/7 運作。
+
+### 架構
+
+```
+本機（處理影片） ──sync──→ Render 雲端（LINE Bot API）←── LINE 使用者
+```
+
+### 一次性設定
+
+1. **註冊 [Render](https://render.com)**（用 GitHub 帳號登入）
+
+2. **在 Render 建立 Web Service**：
+   - 連結 GitHub repo `child_tracker_kg`
+   - Build Command：`pip install -r requirements-cloud.txt`
+   - Start Command：`uvicorn api_cloud:app --host 0.0.0.0 --port $PORT`
+   - 或直接用 `render.yaml`（Render 會自動偵測）
+
+3. **在 Render 設定環境變數**（Environment → Environment Variables）：
+
+   | 變數名稱 | 值 |
+   |----------|----|
+   | `LINE_CHANNEL_SECRET` | 你的 LINE Channel Secret |
+   | `LINE_CHANNEL_ACCESS_TOKEN` | 你的 LINE Channel Access Token |
+   | `LINE_TEACHER_PASSWORD` | 老師密碼（預設 teacher123） |
+   | `SYNC_SECRET` | 自訂同步密碼（本機同步時要用） |
+   | `LINE_DEFAULT_SCHEME` | 預設方案名稱（如：甲班） |
+
+4. **在 LINE Developers 設定 Webhook URL**：
+   ```
+   https://your-app.onrender.com/webhook
+   ```
+
+### 平時使用
+
+在本機處理完影片、建好圖譜後，執行一行指令把資料推到雲端：
+
+```bash
+python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --secret 你的同步密碼
+```
+
+之後 LINE Bot 就能用最新的圖譜資料回覆使用者了。
+
+### LINE Bot 身份驗證
+
+- 老師輸入密碼 → 可查看完整圖譜
+- 學生/家長輸入幼兒名字 → 只能查看該幼兒的個人圖譜
+- 輸入「登出」可切換身份
 
 ---
 
