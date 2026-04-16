@@ -275,12 +275,6 @@ python main.py extract-faces --video data/input/教室.mp4
 python sync_to_cloud.py --scheme 甲班 --url https://your-app.onrender.com --secret 你的同步密碼
 ```
 
-若常同步，可在本機一次設定環境變數 `CLOUD_SYNC_URL`、`SYNC_SECRET`，之後只需：
-
-```bash
-python sync_to_cloud.py --scheme 甲班
-```
-
 之後 LINE Bot 就能用最新的圖譜資料回覆使用者了。
 
 ### 不想休眠後一直重跑 sync？用 Render 持久碟
@@ -294,6 +288,10 @@ python sync_to_cloud.py --scheme 甲班
 > 本機若**重新建圖、換資料**，仍要再 sync 一次才會更新雲端內容；持久碟只解決「空機重啟資料不見」。
 
 其他做法：改用有內建硬碟的 VPS、或之後把圖譜改存 S3／物件儲存（需改程式）。
+
+### Fly.io（Volume + 持久資料）
+
+本 repo 含 `Dockerfile.cloud`、`fly.toml` 範本；完整指令見 [docs/fly-deploy.md](docs/fly-deploy.md)。
 
 ### LINE Bot 身份驗證
 
