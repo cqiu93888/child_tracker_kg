@@ -13,12 +13,26 @@ import urllib.request
 
 
 def _get(url: str, timeout: float = 25.0) -> tuple[int, str]:
+    """回傳 (HTTP 狀態碼, 內文)。連線失敗時狀態碼為 -1，內文為錯誤說明。"""
     req = urllib.request.Request(url, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, r.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
-        return e.code, e.read().decode("utf-8", errors="replace")
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = str(e)
+        return e.code, body
+    except urllib.error.URLError as e:
+        reason = getattr(e, "reason", e)
+        return -1, f"URLError: {reason}"
+    except TimeoutError:
+        return -1, "TimeoutError: 連線逾時（服務休眠或網路慢，請稍後再試）"
+    except OSError as e:
+        return -1, f"OSError: {e}"
+    except Exception as e:
+        return -1, f"{type(e).__name__}: {e}"
 
 
 def main() -> int:
@@ -30,6 +44,11 @@ def main() -> int:
 
     code, body = _get(base + "/")
     print(f"[1] GET /  → HTTP {code}")
+    if code < 0:
+        print(f"\n[ERROR] 無法連到雲端根路徑：{body}")
+        print("   請檢查：網址是否正確、電腦網路／防火牆／校園網是否擋外連、或服務正在喚醒。")
+        print("   可改用手機熱點或瀏覽器直接開同一網址比對。")
+        return 3
     try:
         j = json.loads(body)
     except json.JSONDecodeError:
@@ -82,6 +101,9 @@ def main() -> int:
         probe = base + str(rel)
         c2, b2 = _get(probe)
         print(f"\n[2] GET {probe} → HTTP {c2}")
+        if c2 < 0:
+            print(f"    連線失敗：{b2}")
+            continue
         if c2 == 200:
             try:
                 j2 = json.loads(b2)
@@ -93,8 +115,12 @@ def main() -> int:
             break
         print(f"    內容: {b2[:200]}")
 
+    if c2 < 0:
+        print("\n[FAIL] 分塊路徑皆無法連線（網路／防火牆／SSL），與 Render 版本無關。請換網路或稍後再試。")
+        return 3
+
     if c2 not in (200, 405):
-        print("\n[FAIL] 上述分塊探測路徑皆不可用。請在 Render：Manual Deploy -> Clear build cache & deploy")
+        print("\n[FAIL] 上述分塊探測路徑皆不可用（多為 404）。請在 Render：Manual Deploy -> Clear build cache & deploy")
         print("   並確認 Repository / Branch / Root Directory 正確（見 README「徹底檢查」）。")
         return 1
 
