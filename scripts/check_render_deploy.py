@@ -62,23 +62,35 @@ def main() -> int:
         print("\n[FAIL] 回應不是本專案 api_cloud 的健康檢查 JSON。")
         return 1
 
-    # 與本機 api_cloud 常數對照
-    try:
-        import os
-        import importlib.util
+    # 與本機 api_cloud 常數對照（須先把 repo 根目錄放進 path，否則以
+    # `python scripts/check_render_deploy.py` 執行時 sys.path[0] 為 scripts/，
+    # exec_module(api_cloud) 會因找不到同層的 mp4_inspect 而失敗，誤判為 [OK]。）
+    import os
+    import importlib.util
 
-        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+
+    load_err: str | None = None
+    try:
         path = os.path.join(root, "api_cloud.py")
         spec = importlib.util.spec_from_file_location("api_cloud_check", path)
         mod = importlib.util.module_from_spec(spec)
         assert spec and spec.loader
         spec.loader.exec_module(mod)
-        expected = getattr(mod, "API_CLOUD_DEPLOY_MARK", "")
-    except Exception:
+        expected = str(getattr(mod, "API_CLOUD_DEPLOY_MARK", "") or "")
+    except Exception as e:
+        load_err = f"{type(e).__name__}: {e}"
         expected = ""
 
-    remote_mark = j.get("deploy_mark", "")
-    if not remote_mark or (expected and remote_mark != expected):
+    remote_mark = str(j.get("deploy_mark", "") or "")
+    if load_err:
+        print(f"\n[FAIL] 無法載入本機 api_cloud.py 以比對 deploy_mark：{load_err}")
+        print("   請在專案根目錄執行本腳本，並確認 api_cloud.py 與 mp4_inspect.py 存在。")
+        return 2
+
+    if not remote_mark or remote_mark != expected:
         print(f"\n[FAIL] 雲端仍是舊版 api_cloud，或未部署到與本機相同的 commit。")
         print(f"   本機 deploy_mark 預期: {expected!r}")
         print(f"   線上 deploy_mark 實際: {remote_mark!r}")

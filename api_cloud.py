@@ -5,6 +5,7 @@
 """
 
 import os
+import sys
 import json
 import html
 import hashlib
@@ -12,11 +13,12 @@ import mimetypes
 import hmac
 import base64
 import unicodedata
-from urllib.parse import quote as _url_quote
+from urllib.parse import quote as _url_quote, urlencode
 
 import httpx
+from mp4_inspect import inspect_mp4_path
 from fastapi import FastAPI, File, Form, Query, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 # ---------------------------------------------------------------------------
@@ -121,6 +123,12 @@ def _output_dir(scheme: str) -> str:
 
 _VIDEO_EXTS = {".mp4", ".mov", ".webm", ".avi", ".mkv"}
 
+_VIDEO_NOT_FOUND_MSG = (
+    "找不到該影片。請在本機再執行：python sync_to_cloud.py --scheme <方案> --video 檔名.mp4。"
+    " 若先前同步已成功仍出現本訊息，多半是 Render 主機休眠、重新部署或重啟後「本機磁碟上的檔被清空」"
+    "（免費方案常見）；請再同步一次，或參考 README 為 Render 掛 Persistent Disk 並設定 CLOUD_DATA_DIR。"
+)
+
 
 def _is_staff_role(role: str) -> bool:
     return role in ("teacher", "professor")
@@ -151,6 +159,30 @@ def _list_output_videos(scheme: str) -> list[str]:
         if os.path.isfile(p) and os.path.splitext(fn)[1].lower() in _VIDEO_EXTS:
             out.append(fn)
     return out
+
+
+def _require_playable_mp4_or_raise(path: str, context: str) -> None:
+    inf = inspect_mp4_path(path)
+    if not inf["path_exists"]:
+        raise HTTPException(400, f"{context}：檔案不存在")
+    if inf["size_bytes"] < 64:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise HTTPException(
+            400,
+            f"{context}：檔案過小（{inf['size_bytes']} bytes），請重新同步。",
+        )
+    if not inf["looks_like_mp4"]:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise HTTPException(
+            400,
+            f"{context}：內容不是有效 MP4（{inf.get('hint', '')}）。請在本機確認檔案可播後再 sync。",
+        )
 
 
 def _load_kg(scheme: str) -> dict | None:
@@ -576,7 +608,7 @@ app = FastAPI(
 )
 
 # 部署驗證：GET / 會回傳 deploy_mark。若線上與此字串不符，代表 Render 未拉到最新程式。
-API_CLOUD_DEPLOY_MARK = "py311-2026-04-17-v13-video-inline-player-page"
+API_CLOUD_DEPLOY_MARK = "py311-2026-04-18-v19-audit-line-reply-checkscript"
 
 
 def _get_base_url(request: Request) -> str:
@@ -676,6 +708,14 @@ async def _save_uploaded_output_videos(scheme: str, uploads: list) -> list[str]:
             except OSError:
                 pass
             continue
+        try:
+            _require_playable_mp4_or_raise(dest, "multipart 影片驗證失敗")
+        except HTTPException:
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
+            raise
         saved.append(safe)
     return saved
 
@@ -845,6 +885,7 @@ async def sync_video_chunk(
             except OSError:
                 pass
             raise HTTPException(400, "暫存檔大小為 0，未寫入任何資料")
+        _require_playable_mp4_or_raise(partial, "分塊上傳完成後驗證失敗")
         final_path = os.path.join(_output_dir(scheme), safe)
         try:
             if os.path.isfile(final_path):
@@ -929,8 +970,47 @@ def get_graph_summary(scheme: str = Query("", description="方案名稱")):
     return {"scheme": scheme, "summary": _build_full_summary_text(scheme, kg)}
 
 
-@app.get("/api/output/video", summary="串流追蹤輸出影片（檔名須為已同步者）")
-def get_output_video(
+@app.get("/api/output", summary="追蹤影片入口：網址不完整時說明；有 file 時導向播放頁")
+def api_output_root(
+    request: Request,
+    scheme: str = Query("", description="方案名稱"),
+    file: str = Query("", description="影片檔名（僅 basename）"),
+):
+    """許多人只複製到 /api/output，瀏覽器當成影片開會失敗；有帶 file 時自動轉到 video-page。"""
+    fn = (file or "").strip()
+    if fn:
+        sc = (scheme or "").strip() or _line_default_scheme()
+        dest = (
+            f"{_line_public_base_url(request).rstrip('/')}/api/output/video-page?"
+            + urlencode({"scheme": sc, "file": fn})
+        )
+        return RedirectResponse(url=dest, status_code=307)
+    root = html.escape(_line_public_base_url(request), quote=True)
+    ds = html.escape(_line_default_scheme(), quote=True)
+    help_html = f"""<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>追蹤影片網址說明</title>
+</head>
+<body style="font-family:sans-serif;padding:16px;line-height:1.6;max-width:520px;">
+<h2 style="margin-top:0;">網址不完整，無法播放</h2>
+<p>您目前開的是 <code>/api/output</code>，這裡<strong>不是</strong>影片檔。正確網址須包含路徑與參數，例如：</p>
+<ul>
+<li><code>/api/output/video-page?scheme={ds}&amp;file=output3.mp4</code>（建議，內嵌播放器）</li>
+<li><code>/api/output/video?scheme={ds}&amp;file=output3.mp4</code>（直接串流）</li>
+</ul>
+<p>完整範例（請替換檔名）：<br/>
+<code style="word-break:break-all;">{root}/api/output/video-page?scheme={ds}&amp;file=output3.mp4</code></p>
+<p>在 LINE 請輸入「<strong>影片</strong>」，用機器人給的<strong>按鈕</strong>開啟，勿手動刪短網址。</p>
+</body>
+</html>"""
+    return HTMLResponse(content=help_html, status_code=404)
+
+
+@app.get("/api/output/video-probe", summary="診斷：檢查雲端影片檔頭與大小（無法播放時請開此網址）")
+def probe_output_video(
     scheme: str = Query("", description="方案名稱"),
     file: str = Query(..., description="影片檔名（僅 basename）"),
 ):
@@ -939,18 +1019,43 @@ def get_output_video(
     if not safe:
         raise HTTPException(400, "不支援的檔名或副檔名")
     path = os.path.join(_output_dir(scheme), safe)
+    info = inspect_mp4_path(path)
+    info["scheme"] = scheme
+    info["file"] = safe
+    info["output_dir"] = _output_dir(scheme)
+    return info
+
+
+@app.get("/api/output/video", summary="串流追蹤輸出影片（檔名須為已同步者）")
+def get_output_video(
+    scheme: str = Query("", description="方案名稱"),
+    file: str = Query(..., description="影片檔名（僅 basename）"),
+    download: int = Query(0, description="設 1 時改為下載（attachment），方便用 VLC 開啟"),
+):
+    scheme = scheme or _line_default_scheme()
+    safe = _safe_output_video_name(file)
+    if not safe:
+        raise HTTPException(400, "不支援的檔名或副檔名")
+    path = os.path.join(_output_dir(scheme), safe)
     if not os.path.isfile(path):
+        raise HTTPException(404, _VIDEO_NOT_FOUND_MSG)
+    inf = inspect_mp4_path(path)
+    if not inf["looks_like_mp4"]:
         raise HTTPException(
-            404,
-            "找不到該影片，請在本機執行 sync_to_cloud.py --video 檔名.mp4 或 --with-videos 同步。",
+            415,
+            {
+                "error": "stored_file_not_mp4",
+                "message": "雲端上的檔案不是有效 MP4 標頭，瀏覽器無法播放。請看 probe 欄位後重新同步。",
+                "inspect": inf,
+            },
         )
     mt, _ = mimetypes.guess_type(path)
-    # 預設 attachment 會變成「下載檔」而非內嵌播放；LINE／手機瀏覽器常因此看不到畫面。
+    want_dl = download == 1
     return FileResponse(
         path,
         media_type=mt or "video/mp4",
         filename=safe,
-        content_disposition_type="inline",
+        content_disposition_type="attachment" if want_dl else "inline",
     )
 
 
@@ -967,17 +1072,30 @@ def get_output_video_page(
         raise HTTPException(400, "不支援的檔名或副檔名")
     path = os.path.join(_output_dir(scheme), safe)
     if not os.path.isfile(path):
-        raise HTTPException(
-            404,
-            "找不到該影片，請在本機執行 sync_to_cloud.py --video 檔名.mp4 或 --with-videos 同步。",
-        )
+        raise HTTPException(404, _VIDEO_NOT_FOUND_MSG)
+    inf = inspect_mp4_path(path)
     root = _line_public_base_url(request)
-    src = (
-        f"{root.rstrip('/')}/api/output/video?"
-        f"scheme={_url_quote(scheme)}&file={_url_quote(safe)}"
-    )
+    base_q = urlencode({"scheme": scheme, "file": safe})
+    src = f"{root.rstrip('/')}/api/output/video?{base_q}"
+    dl = f"{root.rstrip('/')}/api/output/video?{base_q}&download=1"
+    probe = f"{root.rstrip('/')}/api/output/video-probe?{base_q}"
     title = html.escape(safe, quote=True)
-    src_esc = html.escape(src, quote=True)
+    src_esc = html.escape(src, quote=True) if inf["looks_like_mp4"] else ""
+    dl_esc = html.escape(dl, quote=True)
+    probe_esc = html.escape(probe, quote=True)
+    probe_json = json.dumps(inf, ensure_ascii=False).replace("<", "\\u003c")
+    bad_banner = ""
+    if not inf["looks_like_mp4"]:
+        hint = html.escape(inf.get("hint") or "檔案標頭異常", quote=True)
+        bad_banner = (
+            f'<p style="margin:10px 12px;padding:10px;background:#4a148c;border-radius:8px;'
+            f'font-size:14px;line-height:1.5;">'
+            f"<strong>伺服器判定此檔無法當標準 MP4 播放</strong>：{hint}<br/>"
+            f"大小：{inf.get('size_bytes', 0)} bytes；檔頭 hex 前 32 bytes：<code>"
+            f"{html.escape(inf.get('prefix_hex', '')[:80], quote=True)}</code><br/>"
+            f"請勿再同步同一損壞檔；在本機確認可播後重新 <code>sync_to_cloud</code>。"
+            f"</p>"
+        )
     page = f"""<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -987,11 +1105,36 @@ def get_output_video_page(
 </head>
 <body style="margin:0;background:#111;color:#eee;font-family:sans-serif;">
 <p style="margin:10px 12px;font-size:14px;">{title}</p>
-<video controls playsinline webkit-playsinline preload="metadata"
-  style="width:100%;height:auto;max-height:calc(100vh - 48px);background:#000;"
+{bad_banner}
+<p style="margin:8px 12px;font-size:13px;line-height:1.5;color:#bbb;">
+  診斷 JSON（<a href="{probe_esc}" style="color:#90caf9;">video-probe</a>）：
+</p>
+<script type="application/json" id="probe-data">{probe_json}</script>
+<p style="margin:8px 12px;font-size:12px;color:#888;word-break:break-all;">
+  若<strong>電腦與手機</strong>皆無法播放：多為<strong>檔損／非 MP4 實體</strong>或編碼器寫壞。請下載後用 VLC 測；本機重跑追蹤並可設 <code>VIDEO_OUTPUT_FOURCC=mp4v</code>。
+</p>
+<p style="margin:8px 12px;"><a href="{dl_esc}" style="color:#90caf9;">下載此影片（download=1）</a></p>
+<p id="v-err" style="margin:8px 12px;font-size:13px;color:#ffb74d;"></p>
+<video id="v0" controls playsinline webkit-playsinline preload="metadata"
+  style="width:100%;height:auto;max-height:calc(100vh - 120px);background:#000;"
   src="{src_esc}">
   您的瀏覽器無法播放此影片（可能不支援此編碼）。
 </video>
+<script>
+(function () {{
+  var v = document.getElementById('v0');
+  var el = document.getElementById('v-err');
+  if (!v || !el) return;
+  function msg(code) {{
+    var m = {{1:'中止或網路錯誤',2:'解碼失敗',3:'解碼不支援',4:'來源無法解讀'}};
+    return m[code] || ('錯誤代碼 ' + code);
+  }}
+  v.addEventListener('error', function () {{
+    var c = v.error ? v.error.code : 0;
+    el.textContent = '無法線上播放：' + msg(c) + '（若 HTTP 415 代表伺服器拒絕串流損壞檔）';
+  }});
+}})();
+</script>
 </body>
 </html>"""
     return HTMLResponse(content=page)
@@ -1014,16 +1157,30 @@ def _verify_line_signature(body: bytes, signature: str) -> bool:
 async def _line_reply(reply_token: str, messages: list[dict]):
     token = _line_channel_access_token()
     if not token:
+        print(
+            "api_cloud: LINE_CHANNEL_ACCESS_TOKEN 未設定，無法 reply（使用者將收不到回覆）。",
+            file=sys.stderr,
+        )
         return
     async with httpx.AsyncClient() as client:
-        await client.post(
-            "https://api.line.me/v2/bot/message/reply",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {token}",
-            },
-            json={"replyToken": reply_token, "messages": messages},
-        )
+        try:
+            r = await client.post(
+                "https://api.line.me/v2/bot/message/reply",
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {token}",
+                },
+                json={"replyToken": reply_token, "messages": messages},
+                timeout=30.0,
+            )
+        except httpx.HTTPError as e:
+            print(f"api_cloud: LINE reply 連線失敗: {e}", file=sys.stderr)
+            return
+        if r.status_code >= 400:
+            print(
+                f"api_cloud: LINE reply HTTP {r.status_code} {r.text[:500]}",
+                file=sys.stderr,
+            )
 
 
 def _build_full_summary_text(scheme: str, kg: dict | None = None) -> str:
@@ -1126,7 +1283,10 @@ async def line_webhook(request: Request):
     if not _verify_line_signature(body, signature):
         raise HTTPException(403, "Invalid signature")
 
-    payload = json.loads(body)
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as e:
+        raise HTTPException(400, f"Invalid JSON body: {e}") from e
     events = payload.get("events", [])
     base_url = _line_public_base_url(request)
 
@@ -1326,4 +1486,5 @@ def health():
             "/api/sync/video-chunk",
             "/api/sync-video-chunk",
         ],
+        "video_probe_path": "/api/output/video-probe",
     }
