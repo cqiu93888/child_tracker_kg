@@ -546,7 +546,7 @@ app = FastAPI(
 )
 
 # 部署驗證：GET / 會回傳 deploy_mark。若線上與此字串不符，代表 Render 未拉到最新程式。
-API_CLOUD_DEPLOY_MARK = "video-chunk-2026-04-17-v3"
+API_CLOUD_DEPLOY_MARK = "video-chunk-2026-04-17-v4"
 
 
 def _get_base_url(request: Request) -> str:
@@ -679,14 +679,12 @@ async def sync_data(request: Request):
 
 @app.get("/api/sync/video-chunk", summary="探測分塊上傳 API 是否已部署")
 @app.get("/api/sync-video-chunk", summary="（別名）探測分塊上傳 API")
-@app.get("/api/v1/video-chunk", summary="（扁平別名）探測分塊上傳 API")
 def sync_video_chunk_probe():
     return {"video_chunk": True, "post": "secret, scheme, filename, phase=start|append|finish"}
 
 
 @app.post("/api/sync/video-chunk", summary="分塊上傳大影片（降低 Render 502／逾時）")
 @app.post("/api/sync-video-chunk", summary="（路徑別名）同上")
-@app.post("/api/v1/video-chunk", summary="（扁平別名）同上")
 async def sync_video_chunk(
     secret: str = Form(...),
     scheme: str = Form(...),
@@ -758,29 +756,6 @@ async def sync_video_chunk(
         return {"message": "同步完成", "scheme": scheme, "saved": [safe]}
 
     raise HTTPException(400, "phase 必須為 start、append 或 finish")
-
-
-@app.post("/api/sync-videos", summary="（相容舊版）multipart 上傳影片，行為同 POST /api/sync")
-async def sync_videos(
-    secret: str = Form(...),
-    scheme: str = Form(...),
-    files: list[UploadFile] | None = File(default=None),
-):
-    expected = _sync_secret_expected()
-    if not hmac.compare_digest(str(secret).strip(), expected):
-        raise HTTPException(403, "Invalid sync secret")
-
-    scheme = str(scheme).strip()
-    if not scheme:
-        raise HTTPException(400, "scheme is required")
-
-    uploads = list(files or [])
-    if not uploads:
-        raise HTTPException(400, "請至少上傳一個影片檔（files）")
-    saved = await _save_uploaded_output_videos(scheme, uploads)
-    if not saved:
-        raise HTTPException(400, "沒有寫入任何影片（檔名或副檔名不符合）")
-    return {"message": "同步完成", "scheme": scheme, "saved": saved}
 
 
 # ---------------------------------------------------------------------------
@@ -1185,6 +1160,5 @@ def health():
         "video_chunk_paths": [
             "/api/sync/video-chunk",
             "/api/sync-video-chunk",
-            "/api/v1/video-chunk",
         ],
     }

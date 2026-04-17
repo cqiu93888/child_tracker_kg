@@ -34,7 +34,6 @@ _VIDEO_GLOB = ("*.mp4", "*.mov", "*.webm", "*.avi", "*.mkv")
 _CHUNK_PATHS = (
     "/api/sync/video-chunk",
     "/api/sync-video-chunk",
-    "/api/v1/video-chunk",
 )
 
 

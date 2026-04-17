@@ -93,7 +93,6 @@ def main() -> int:
         paths = [
             "/api/sync/video-chunk",
             "/api/sync-video-chunk",
-            "/api/v1/video-chunk",
         ]
     c2, b2 = 404, ""
     probe = ""

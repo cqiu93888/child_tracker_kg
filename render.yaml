@@ -11,6 +11,8 @@ services:
         sync: false
       - key: LINE_TEACHER_PASSWORD
         sync: false
+      - key: LINE_PROFESSOR_PASSWORD
+        sync: false
       - key: SYNC_SECRET
         sync: false
       - key: LINE_DEFAULT_SCHEME
