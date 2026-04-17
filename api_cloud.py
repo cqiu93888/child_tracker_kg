@@ -608,7 +608,7 @@ app = FastAPI(
 )
 
 # 部署驗證：GET / 會回傳 deploy_mark。若線上與此字串不符，代表 Render 未拉到最新程式。
-API_CLOUD_DEPLOY_MARK = "py311-2026-04-18-v19-audit-line-reply-checkscript"
+API_CLOUD_DEPLOY_MARK = "py311-2026-04-18-v20-mp4-browser-hint"
 
 
 def _get_base_url(request: Request) -> str:
@@ -1085,6 +1085,13 @@ def get_output_video_page(
     probe_esc = html.escape(probe, quote=True)
     probe_json = json.dumps(inf, ensure_ascii=False).replace("<", "\\u003c")
     bad_banner = ""
+    play_hint = (inf.get("playback_hint_zh") or "").strip()
+    if play_hint and inf.get("looks_like_mp4"):
+        ph_esc = html.escape(play_hint, quote=True)
+        bad_banner += (
+            f'<p style="margin:10px 12px;padding:10px;background:#33691e;border-radius:8px;'
+            f'font-size:14px;line-height:1.55;">{ph_esc}</p>'
+        )
     if not inf["looks_like_mp4"]:
         hint = html.escape(inf.get("hint") or "檔案標頭異常", quote=True)
         bad_banner = (
@@ -1111,7 +1118,8 @@ def get_output_video_page(
 </p>
 <script type="application/json" id="probe-data">{probe_json}</script>
 <p style="margin:8px 12px;font-size:12px;color:#888;word-break:break-all;">
-  若<strong>電腦與手機</strong>皆無法播放：多為<strong>檔損／非 MP4 實體</strong>或編碼器寫壞。請下載後用 VLC 測；本機重跑追蹤並可設 <code>VIDEO_OUTPUT_FOURCC=mp4v</code>。
+  <strong>可下載但線上不能播</strong>：多半是 <strong>MP4 內為 mp4v（MPEG-4 Part 2）</strong> 等非 H.264，VLC 可播但 Chrome／多數手機內建播放器不支援。
+  請在本機重跑追蹤時使用預設 <code>VIDEO_OUTPUT_FOURCC=auto</code>（會優先 avc1/H264），或轉檔 <code>ffmpeg -i 舊.mp4 -c:v libx264 -movflags +faststart 新.mp4</code> 後再 <code>sync_to_cloud</code>。
 </p>
 <p style="margin:8px 12px;"><a href="{dl_esc}" style="color:#90caf9;">下載此影片（download=1）</a></p>
 <p id="v-err" style="margin:8px 12px;font-size:13px;color:#ffb74d;"></p>
