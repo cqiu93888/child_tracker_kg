@@ -16,7 +16,7 @@
 想「不必因主機休眠而反覆 sync」：請在 Render 掛 Persistent Disk 並設 CLOUD_DATA_DIR（見 README）。
 
 加上 --with-videos 可上傳該方案相關目錄內**全部**追蹤輸出影片；若只要某一檔請用 --video output3.mp4（可重複）。
-影片預設以 POST /api/sync/video-chunk 分塊上傳（避免 Render 502）；小檔亦可手動用 multipart 的 POST /api/sync。
+影片預設以 POST /api/sync/video-chunk 分塊上傳。若雲端尚無該 API（404），總大小在 SYNC_LEGACY_MULTIPART_MAX_MB（預設 48）以下時會自動改試單次 multipart；超過則必須先部署新版。
 預設先找 data/schemes/<方案>/output；若為空，會改找 data/output。
 """
 
@@ -59,15 +59,71 @@ def _resolve_video_chunk_url(httpx_mod, base_url: str) -> str:
     return ""
 
 
+def _upload_videos_multipart_once(
+    httpx_mod,
+    sync_url: str,
+    secret: str,
+    scheme: str,
+    paths: list[str],
+    timeout: float,
+) -> None:
+    """單一 POST /api/sync multipart（雲端須至少支援 multipart 的 api_cloud）。"""
+    handles: list[object] = []
+    file_parts: list[tuple[str, tuple[str, object, str]]] = []
+    try:
+        for p in paths:
+            bn = os.path.basename(p)
+            fh = open(p, "rb")
+            handles.append(fh)
+            file_parts.append(("files", (bn, fh, "video/mp4")))
+        data = {"secret": secret, "scheme": scheme}
+        r = httpx_mod.post(sync_url, data=data, files=file_parts, timeout=timeout)
+        if r.status_code != 200:
+            print(f"[ERROR] multipart 影片同步失敗（HTTP {r.status_code}）")
+            print(f"     {r.text}")
+            sys.exit(1)
+        print(f"[OK] 已儲存：{', '.join(r.json().get('saved', []))}")
+    finally:
+        for fh in handles:
+            try:
+                fh.close()
+            except Exception:
+                pass
+
+
 def _upload_videos_in_chunks(httpx_mod, base_url: str, secret: str, scheme: str, paths: list[str]) -> None:
-    """大檔分塊 POST，減少 Render 閘道 502（單請求過大／過久）。"""
+    """優先分塊 POST；雲端無分塊 API 且總檔案不大時改試單次 multipart。"""
+    sync_url = f"{base_url.rstrip('/')}/api/sync"
     chunk_url = _resolve_video_chunk_url(httpx_mod, base_url)
+    total_sz = sum(os.path.getsize(p) for p in paths)
+    legacy_max = int(os.environ.get("SYNC_LEGACY_MULTIPART_MAX_MB", "48")) * 1024 * 1024
+    force_mp = os.environ.get("SYNC_FORCE_MULTIPART", "").strip() in ("1", "true", "yes")
+
     if not chunk_url:
-        print("[ERROR] 雲端找不到「分塊上傳」API（GET /api/sync/video-chunk 回傳 404）。")
-        print("        代表 Render 上跑的還不是 GitHub 最新版（尚未含 video-chunk）。")
-        print("        請到：Render Dashboard → 你的 Web Service → Manual Deploy → Deploy latest commit")
-        print("        並確認連線的 Branch 為 main、Build 成功後再重跑本指令。")
-        sys.exit(1)
+        print("[WARN] 雲端 GET /api/sync/video-chunk 為 404：未部署分塊 API。")
+        if total_sz > legacy_max and not force_mp:
+            print(
+                f"[ERROR] 本機待上傳影片合計約 {total_sz / (1024**3):.2f} GB，超過備援上限 "
+                f"{legacy_max // (1024**2)} MB（可調高 SYNC_LEGACY_MULTIPART_MAX_MB 或設 SYNC_FORCE_MULTIPART=1）。"
+            )
+            print("        大檔**必須**在 Render 部署含 /api/sync/video-chunk 的最新 api_cloud。")
+            print("        請：Render → Web Service → Manual Deploy → Clear build cache & deploy")
+            print("        並確認 Start Command：uvicorn api_cloud:app --host 0.0.0.0 --port $PORT")
+            print("        部署後執行：python scripts/check_render_deploy.py " + base_url.rstrip("/"))
+            print("        若仍無法部署，可暫時壓縮影片至較小再試，或設 SYNC_FORCE_MULTIPART=1 強制單次上傳（易 502）。")
+            sys.exit(1)
+        if total_sz > legacy_max and force_mp:
+            print(
+                "[WARN] 已設定 SYNC_FORCE_MULTIPART=1：將以單次 multipart 上傳超大檔，極可能 502。"
+            )
+        print(
+            f"[INFO] 改試單次 multipart → {sync_url}（合計 {total_sz / (1024**2):.1f} MB；大檔可能 502）…"
+        )
+        _upload_videos_multipart_once(
+            httpx_mod, sync_url, secret, scheme, paths, timeout=600.0
+        )
+        return
+
     print(f"[INFO] 分塊上傳端點：{chunk_url}")
     chunk_mb = int(os.environ.get("SYNC_UPLOAD_CHUNK_MB", "8"))
     chunk_bytes = max(1, chunk_mb) * 1024 * 1024
@@ -291,7 +347,7 @@ def main():
 
     if paths:
         print(
-            f"\n正在上傳 {len(paths)} 支影片（分塊 API，避免單次請求過大導致 Render 502）…"
+            f"\n正在上傳 {len(paths)} 支影片（優先分塊；雲端無分塊時小檔可自動改 multipart）…"
         )
         try:
             _upload_videos_in_chunks(httpx, base_url, secret, scheme, paths)

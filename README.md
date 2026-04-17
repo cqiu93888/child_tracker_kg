@@ -292,6 +292,9 @@ python main.py extract-faces --video data/input/教室.mp4
      `python scripts/check_render_deploy.py https://你的服務.onrender.com`  
      若顯示 `[FAIL]`，依腳本提示對照 Render 設定。
 
+6. **暫時無法部署分塊 API 時（不建議，僅過渡）**  
+   `sync_to_cloud.py` 在雲端 **404** 分塊路徑時，若影片總大小 ≤ `SYNC_LEGACY_MULTIPART_MAX_MB`（預設 48），會自動改試單次 `POST /api/sync`（雲端須已支援 multipart）。**超過預設大小會直接中止**，請先部署新版；若仍要賭單次上傳可設 `SYNC_FORCE_MULTIPART=1`（大檔極易 **502**）。
+
 ### 平時使用
 
 在本機處理完影片、建好圖譜後，執行一行指令把資料推到雲端：
