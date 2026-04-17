@@ -245,11 +245,12 @@ python main.py extract-faces --video data/input/教室.mp4
 
 1. **註冊 [Render](https://render.com)**（用 GitHub 帳號登入）
 
-2. **在 Render 建立 Web Service**：
-   - 連結 GitHub repo `child_tracker_kg`
-   - Build Command：`pip install -r requirements-cloud.txt`
-   - Start Command：`uvicorn api_cloud:app --host 0.0.0.0 --port $PORT`
-   - 或直接用 `render.yaml`（Render 會自動偵測）
+2. **在 Render 建立 Web Service**（擇一）：
+   - **Blueprint**：在 Render 選「New Blueprint」連結 repo，會讀取根目錄 `render.yaml`（內含 build／start）。
+   - **手動 Web Service**：選「New Web Service」連結 repo 時，**不會**自動套用 `render.yaml`；請在服務 **Settings** 手動填：
+     - Build Command：`pip install -r requirements-cloud.txt`
+     - Start Command：`uvicorn api_cloud:app --host 0.0.0.0 --port $PORT`  
+     專案根目錄已加 **`Procfile`**（`web: uvicorn api_cloud:app ...`），可與上述設定雙重保險，避免誤設成 `api:app`（那是另一支 `api.py`，沒有雲端 LINE／分塊同步）。
 
 3. **在 Render 設定環境變數**（Environment → Environment Variables）：
 
@@ -268,6 +269,28 @@ python main.py extract-faces --video data/input/教室.mp4
    https://your-app.onrender.com/webhook
    ```
    若曾改為其他主機（例如 Fly），請改回上述 **Render 網址** 並重新驗證。
+
+### 分塊 API 仍 404／影片同步失敗？徹底檢查
+
+1. **本機與 GitHub 一致**  
+   `git pull` 後，`git log -1 --oneline` 應能看到含 `video-chunk` 或 `deploy` 相關的 commit。
+
+2. **Render 真的在部署這個 repo 的 `main`**  
+   Settings → **Build & Deploy**：Repository、Branch（建議 `main`）、**Root Directory**（多數情況留空）。
+
+3. **Start Command 必須是 `api_cloud`**  
+   必須為：`uvicorn api_cloud:app --host 0.0.0.0 --port $PORT`  
+   若誤設為 `uvicorn api:app`，健康檢查可能仍像雲端 API，但**不會**有分塊上傳等 `api_cloud` 專用路由。
+
+4. **強制重編**  
+   **Manual Deploy → Clear build cache & deploy**，等狀態 **Live** 且 Build 無錯。
+
+5. **用瀏覽器或腳本驗證線上版本**  
+   - 開 `https://你的服務.onrender.com/`：JSON 裡應有 **`deploy_mark`**（例如 `video-chunk-2026-04-16`）與 **`video_chunk_probe`**。若沒有，代表線上仍舊版。  
+   - 開 `https://你的服務.onrender.com/api/sync/video-chunk`：應回 **`"video_chunk": true`**（GET 探測）。  
+   - 本機執行：  
+     `python scripts/check_render_deploy.py https://你的服務.onrender.com`  
+     若顯示 `[FAIL]`，依腳本提示對照 Render 設定。
 
 ### 平時使用
 
