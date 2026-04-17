@@ -250,7 +250,7 @@ python main.py extract-faces --video data/input/教室.mp4
    - **手動 Web Service**：選「New Web Service」連結 repo 時，**不會**自動套用 `render.yaml`；請在服務 **Settings** 手動填：
      - Build Command：`pip install -r requirements-cloud.txt`
      - Start Command：`uvicorn api_cloud:app --host 0.0.0.0 --port $PORT`  
-     專案根目錄已加 **`Procfile`**（`web: uvicorn api_cloud:app ...`），可與上述設定雙重保險，避免誤設成 `api:app`（那是另一支 `api.py`，沒有雲端 LINE／分塊同步）。
+     （勿設成 `api:app`：`api.py` 是另一支本機用 API，沒有雲端 LINE／分塊同步。）
 
 3. **在 Render 設定環境變數**（Environment → Environment Variables）：
 

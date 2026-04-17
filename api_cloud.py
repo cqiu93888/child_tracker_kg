@@ -17,7 +17,6 @@ import httpx
 from fastapi import FastAPI, File, Form, Query, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
-from pyvis.network import Network
 
 # ---------------------------------------------------------------------------
 # Config (all from environment variables)
@@ -467,6 +466,8 @@ def _draw_relationship_graph(
     title: str = "幼兒關係圖",
     focal_node_id: str = None,
 ) -> str:
+    from pyvis.network import Network
+
     focal = focal_node_id or kg_data.get("focal_id")
     net = Network(
         height=GRAPH_HEIGHT, width="100%",
@@ -546,7 +547,7 @@ app = FastAPI(
 )
 
 # 部署驗證：GET / 會回傳 deploy_mark。若線上與此字串不符，代表 Render 未拉到最新程式。
-API_CLOUD_DEPLOY_MARK = "video-chunk-2026-04-17-v4"
+API_CLOUD_DEPLOY_MARK = "video-chunk-2026-04-17-v5"
 
 
 def _get_base_url(request: Request) -> str:
