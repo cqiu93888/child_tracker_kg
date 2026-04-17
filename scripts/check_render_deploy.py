@@ -69,20 +69,32 @@ def main() -> int:
         print("   然後 Manual Deploy -> Clear build cache & deploy")
         return 1
 
-    probe = base + "/api/sync/video-chunk"
-    c2, b2 = _get(probe)
-    print(f"\n[2] GET {probe} → HTTP {c2}")
-    if c2 == 200:
-        try:
-            j2 = json.loads(b2)
-            print(f"    video_chunk: {j2.get('video_chunk')}")
-        except json.JSONDecodeError:
-            print(f"    內容: {b2[:200]}")
-    else:
-        print(f"    內容: {b2[:300]}")
+    paths = j.get("video_chunk_paths")
+    if not isinstance(paths, list) or not paths:
+        paths = [
+            "/api/sync/video-chunk",
+            "/api/sync-video-chunk",
+            "/api/v1/video-chunk",
+        ]
+    c2, b2 = 404, ""
+    probe = ""
+    for rel in paths:
+        probe = base + str(rel)
+        c2, b2 = _get(probe)
+        print(f"\n[2] GET {probe} → HTTP {c2}")
+        if c2 == 200:
+            try:
+                j2 = json.loads(b2)
+                print(f"    video_chunk: {j2.get('video_chunk')}")
+            except json.JSONDecodeError:
+                print(f"    內容: {b2[:200]}")
+            break
+        if c2 == 405:
+            break
+        print(f"    內容: {b2[:200]}")
 
-    if c2 != 200:
-        print("\n[FAIL] 分塊 API 探測路徑不可用。請在 Render：Manual Deploy -> Clear build cache & deploy")
+    if c2 not in (200, 405):
+        print("\n[FAIL] 上述分塊探測路徑皆不可用。請在 Render：Manual Deploy -> Clear build cache & deploy")
         print("   並確認 Repository / Branch / Root Directory 正確（見 README「徹底檢查」）。")
         return 1
 

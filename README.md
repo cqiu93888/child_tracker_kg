@@ -286,8 +286,8 @@ python main.py extract-faces --video data/input/教室.mp4
    **Manual Deploy → Clear build cache & deploy**，等狀態 **Live** 且 Build 無錯。
 
 5. **用瀏覽器或腳本驗證線上版本**  
-   - 開 `https://你的服務.onrender.com/`：JSON 裡應有 **`deploy_mark`**（例如 `video-chunk-2026-04-16`）與 **`video_chunk_probe`**。若沒有，代表線上仍舊版。  
-   - 開 `https://你的服務.onrender.com/api/sync/video-chunk`：應回 **`"video_chunk": true`**（GET 探測）。  
+   - 開 `https://你的服務.onrender.com/`：JSON 裡應有 **`deploy_mark`**（會隨版本變更）與 **`video_chunk_paths`**。若沒有，代表線上仍舊版。  
+   - 任一探測網址應回 **`"video_chunk": true`**（GET）：`/api/sync/video-chunk`、`/api/sync-video-chunk`、`/api/v1/video-chunk`。  
    - 本機執行：  
      `python scripts/check_render_deploy.py https://你的服務.onrender.com`  
      若顯示 `[FAIL]`，依腳本提示對照 Render 設定。

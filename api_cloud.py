@@ -546,7 +546,7 @@ app = FastAPI(
 )
 
 # 部署驗證：GET / 會回傳 deploy_mark。若線上與此字串不符，代表 Render 未拉到最新程式。
-API_CLOUD_DEPLOY_MARK = "video-chunk-2026-04-16"
+API_CLOUD_DEPLOY_MARK = "video-chunk-2026-04-17-v3"
 
 
 def _get_base_url(request: Request) -> str:
@@ -679,12 +679,14 @@ async def sync_data(request: Request):
 
 @app.get("/api/sync/video-chunk", summary="探測分塊上傳 API 是否已部署")
 @app.get("/api/sync-video-chunk", summary="（別名）探測分塊上傳 API")
+@app.get("/api/v1/video-chunk", summary="（扁平別名）探測分塊上傳 API")
 def sync_video_chunk_probe():
     return {"video_chunk": True, "post": "secret, scheme, filename, phase=start|append|finish"}
 
 
 @app.post("/api/sync/video-chunk", summary="分塊上傳大影片（降低 Render 502／逾時）")
 @app.post("/api/sync-video-chunk", summary="（路徑別名）同上")
+@app.post("/api/v1/video-chunk", summary="（扁平別名）同上")
 async def sync_video_chunk(
     secret: str = Form(...),
     scheme: str = Form(...),
@@ -1180,4 +1182,9 @@ def health():
         "app": "api_cloud",
         "deploy_mark": API_CLOUD_DEPLOY_MARK,
         "video_chunk_probe": "/api/sync/video-chunk",
+        "video_chunk_paths": [
+            "/api/sync/video-chunk",
+            "/api/sync-video-chunk",
+            "/api/v1/video-chunk",
+        ],
     }

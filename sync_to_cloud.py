@@ -31,7 +31,11 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 _VIDEO_GLOB = ("*.mp4", "*.mov", "*.webm", "*.avi", "*.mkv")
 
-_CHUNK_PATHS = ("/api/sync/video-chunk", "/api/sync-video-chunk")
+_CHUNK_PATHS = (
+    "/api/sync/video-chunk",
+    "/api/sync-video-chunk",
+    "/api/v1/video-chunk",
+)
 
 
 def _resolve_video_chunk_url(httpx_mod, base_url: str) -> str:
