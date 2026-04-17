@@ -547,7 +547,7 @@ app = FastAPI(
 )
 
 # 部署驗證：GET / 會回傳 deploy_mark。若線上與此字串不符，代表 Render 未拉到最新程式。
-API_CLOUD_DEPLOY_MARK = "py311-2026-04-17-v7-python-pin"
+API_CLOUD_DEPLOY_MARK = "py311-2026-04-17-v8-multipart"
 
 
 def _get_base_url(request: Request) -> str:
