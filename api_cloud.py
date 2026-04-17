@@ -6,6 +6,7 @@
 
 import os
 import json
+import html
 import hashlib
 import mimetypes
 import hmac
@@ -316,6 +317,10 @@ def _ego_knowledge_graph(
 
 
 def _node_color(personality_list):
+    if isinstance(personality_list, str):
+        personality_list = [personality_list] if personality_list.strip() else []
+    elif not isinstance(personality_list, (list, tuple)):
+        personality_list = []
     if personality_list and personality_list[0] in PERSONALITY_COLORS:
         return PERSONALITY_COLORS[personality_list[0]]
     return PERSONALITY_COLORS["觀察中"]
@@ -469,6 +474,7 @@ def _draw_relationship_graph(
     from pyvis.network import Network
 
     focal = focal_node_id or kg_data.get("focal_id")
+    focal_s = str(focal) if focal is not None else None
     net = Network(
         height=GRAPH_HEIGHT, width="100%",
         bgcolor="#fafafa", font_color="#333", directed=False,
@@ -506,27 +512,50 @@ def _draw_relationship_graph(
     )
 
     node_size = NODE_SIZE
+    node_ids: set[str] = set()
     for n in kg_data.get("nodes", []):
-        pid = n["id"]
-        label = n["label"]
+        if not isinstance(n, dict):
+            continue
+        pid = n.get("id")
+        label = n.get("label")
+        if pid is None or label is None:
+            continue
+        pid_s, label_s = str(pid), str(label)
+        node_ids.add(pid_s)
         pers = n.get("personality", [])
-        pers_str = "、".join(pers) if pers else "觀察中"
-        is_focal = focal and pid == focal
-        title_str = f"{'【中心】' if is_focal else ''}{label}\n個性：{pers_str}"
+        if isinstance(pers, str):
+            pers = [pers] if pers.strip() else []
+        elif not isinstance(pers, (list, tuple)):
+            pers = []
+        pers_str = "、".join(str(x) for x in pers) if pers else "觀察中"
+        is_focal = bool(focal_s and pid_s == focal_s)
+        title_str = f"{'【中心】' if is_focal else ''}{label_s}\n個性：{pers_str}"
         color = _node_color(pers)
         sz = int(node_size * 1.45) if is_focal else node_size
-        kwargs = dict(label=label, title=title_str, size=sz, color=color)
+        kwargs = dict(label=label_s, title=title_str, size=sz, color=color)
         if is_focal:
             kwargs["borderWidth"] = 3
             kwargs["color"] = {"background": color, "border": "#1565C0"}
-        net.add_node(pid, **kwargs)
+        net.add_node(pid_s, **kwargs)
 
     for e in kg_data.get("edges", []):
+        if not isinstance(e, dict):
+            continue
+        s, t = e.get("source"), e.get("target")
+        if s is None or t is None:
+            continue
+        s, t = str(s), str(t)
+        if node_ids and (s not in node_ids or t not in node_ids):
+            continue
         w = e.get("weight", 1)
+        try:
+            wf = float(w if w is not None else 1)
+        except (TypeError, ValueError):
+            wf = 1.0
         co = e.get("cooccurrence", 0)
-        width = max(1.0, min(1.4 + w / 12.0, 7.0))
+        width = max(1.0, min(1.4 + wf / 12.0, 7.0))
         net.add_edge(
-            e["source"], e["target"], value=w,
+            s, t, value=w,
             title=f"朋友關係 · 同框 {co} 次", width=width,
         )
 
@@ -547,13 +576,63 @@ app = FastAPI(
 )
 
 # 部署驗證：GET / 會回傳 deploy_mark。若線上與此字串不符，代表 Render 未拉到最新程式。
-API_CLOUD_DEPLOY_MARK = "py311-2026-04-17-v9-head-root"
+API_CLOUD_DEPLOY_MARK = "py311-2026-04-17-v13-video-inline-player-page"
 
 
 def _get_base_url(request: Request) -> str:
     if RENDER_EXTERNAL_URL:
         return RENDER_EXTERNAL_URL.rstrip("/")
     return str(request.base_url).rstrip("/")
+
+
+def _line_public_base_url(request: Request) -> str:
+    """LINE 外開連結須為可點辨識的 https；避免 Render 內部 http BaseURL 導致無法一鍵開啟。"""
+    root = _get_base_url(request).strip().rstrip("/")
+    if root.startswith("http://") and "onrender.com" in root:
+        root = "https://" + root[len("http://"):]
+    return root
+
+
+def _flex_uri_link_bubble(
+    *,
+    alt: str,
+    title: str,
+    subtitle: str = "",
+    buttons: list[tuple[str, str]],
+) -> dict:
+    """Flex 按鈕 action=uri，在 LINE 內必可點（純文字 URL 易被縮排／冒號干擾無法辨識）。"""
+    contents: list[dict] = [
+        {"type": "text", "text": title, "weight": "bold", "size": "md", "wrap": True},
+    ]
+    if subtitle:
+        contents.append(
+            {
+                "type": "text",
+                "text": subtitle,
+                "size": "xs",
+                "color": "#888888",
+                "margin": "md",
+                "wrap": True,
+            }
+        )
+    for lab, uri in buttons:
+        safe_lab = lab if len(lab) <= 40 else (lab[:37] + "…")
+        contents.append(
+            {
+                "type": "button",
+                "style": "link",
+                "height": "sm",
+                "action": {"type": "uri", "label": safe_lab, "uri": uri},
+            }
+        )
+    return {
+        "type": "flex",
+        "altText": alt[:300],
+        "contents": {
+            "type": "bubble",
+            "body": {"type": "box", "layout": "vertical", "spacing": "sm", "contents": contents},
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -614,7 +693,7 @@ async def sync_data(request: Request):
         expected = _sync_secret_expected()
         if not hmac.compare_digest(secret, expected):
             raise HTTPException(403, "Invalid sync secret")
-        scheme = str(form.get("scheme", "")).strip()
+        scheme = str(form.get("scheme") or "").strip()
         if not scheme:
             raise HTTPException(400, "scheme is required")
         uploads = [v for v in form.getlist("files") if isinstance(v, StarletteUploadFile)]
@@ -637,7 +716,7 @@ async def sync_data(request: Request):
     if not hmac.compare_digest(secret, expected):
         raise HTTPException(403, "Invalid sync secret")
 
-    scheme = body.get("scheme", "").strip()
+    scheme = str(body.get("scheme") or "").strip()
     if not scheme:
         raise HTTPException(400, "scheme is required")
 
@@ -646,36 +725,55 @@ async def sync_data(request: Request):
 
     if kg_data is None and names is None:
         raise HTTPException(400, "No data provided")
+    if kg_data is not None and not isinstance(kg_data, dict):
+        raise HTTPException(400, "knowledge_graph 必須為 JSON 物件")
 
     sd = _scheme_dir(scheme)
     gd = _graph_dir(scheme)
 
-    saved = []
+    saved: list[str] = []
+    warnings: list[str] = []
     if kg_data is not None:
         p = os.path.join(gd, "knowledge_graph.json")
         with open(p, "w", encoding="utf-8") as f:
             json.dump(kg_data, f, ensure_ascii=False, indent=1)
         saved.append("knowledge_graph.json")
 
-        _draw_relationship_graph(
-            kg_data, os.path.join(gd, "relationship_graph.html"),
-            title=f"幼兒關係圖（{scheme}）",
-        )
-        saved.append("relationship_graph.html")
+        rel_html = os.path.join(gd, "relationship_graph.html")
+        try:
+            _draw_relationship_graph(
+                kg_data,
+                rel_html,
+                title=f"幼兒關係圖（{scheme}）",
+            )
+            saved.append("relationship_graph.html")
+        except Exception as ex:
+            warnings.append(f"relationship_graph.html 未生成：{ex}")
 
-        _draw_relationship_graph(
-            kg_data, os.path.join(gd, "knowledge_graph.html"),
-            title=f"幼兒知識圖譜（{scheme}）",
-        )
-        saved.append("knowledge_graph.html")
+        kg_html = os.path.join(gd, "knowledge_graph.html")
+        try:
+            _draw_relationship_graph(
+                kg_data,
+                kg_html,
+                title=f"幼兒知識圖譜（{scheme}）",
+            )
+            saved.append("knowledge_graph.html")
+        except Exception as ex:
+            warnings.append(f"knowledge_graph.html 未生成：{ex}")
 
     if names is not None:
         p = os.path.join(sd, "registered_names.json")
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(names, f, ensure_ascii=False)
+        try:
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(names, f, ensure_ascii=False)
+        except (TypeError, ValueError) as ex:
+            raise HTTPException(400, f"registered_names 無法寫入 JSON：{ex}") from ex
         saved.append("registered_names.json")
 
-    return {"message": "同步完成", "scheme": scheme, "saved": saved}
+    out: dict = {"message": "同步完成", "scheme": scheme, "saved": saved}
+    if warnings:
+        out["warnings"] = warnings
+    return out
 
 
 @app.get("/api/sync/video-chunk", summary="探測分塊上傳 API 是否已部署")
@@ -847,7 +945,56 @@ def get_output_video(
             "找不到該影片，請在本機執行 sync_to_cloud.py --video 檔名.mp4 或 --with-videos 同步。",
         )
     mt, _ = mimetypes.guess_type(path)
-    return FileResponse(path, media_type=mt or "video/mp4", filename=safe)
+    # 預設 attachment 會變成「下載檔」而非內嵌播放；LINE／手機瀏覽器常因此看不到畫面。
+    return FileResponse(
+        path,
+        media_type=mt or "video/mp4",
+        filename=safe,
+        content_disposition_type="inline",
+    )
+
+
+@app.get("/api/output/video-page", response_class=HTMLResponse, summary="內嵌播放器頁（給 LINE／手機瀏覽器用）")
+def get_output_video_page(
+    request: Request,
+    scheme: str = Query("", description="方案名稱"),
+    file: str = Query(..., description="影片檔名（僅 basename）"),
+):
+    """以 <video> 包一層，避免部分 WebView 直接開 .mp4 URL 無法播放。"""
+    scheme = (scheme or "").strip() or _line_default_scheme()
+    safe = _safe_output_video_name(file)
+    if not safe:
+        raise HTTPException(400, "不支援的檔名或副檔名")
+    path = os.path.join(_output_dir(scheme), safe)
+    if not os.path.isfile(path):
+        raise HTTPException(
+            404,
+            "找不到該影片，請在本機執行 sync_to_cloud.py --video 檔名.mp4 或 --with-videos 同步。",
+        )
+    root = _line_public_base_url(request)
+    src = (
+        f"{root.rstrip('/')}/api/output/video?"
+        f"scheme={_url_quote(scheme)}&file={_url_quote(safe)}"
+    )
+    title = html.escape(safe, quote=True)
+    src_esc = html.escape(src, quote=True)
+    page = f"""<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>{title}</title>
+</head>
+<body style="margin:0;background:#111;color:#eee;font-family:sans-serif;">
+<p style="margin:10px 12px;font-size:14px;">{title}</p>
+<video controls playsinline webkit-playsinline preload="metadata"
+  style="width:100%;height:auto;max-height:calc(100vh - 48px);background:#000;"
+  src="{src_esc}">
+  您的瀏覽器無法播放此影片（可能不支援此編碼）。
+</video>
+</body>
+</html>"""
+    return HTMLResponse(content=page)
 
 
 # ---------------------------------------------------------------------------
@@ -981,7 +1128,7 @@ async def line_webhook(request: Request):
 
     payload = json.loads(body)
     events = payload.get("events", [])
-    base_url = _get_base_url(request)
+    base_url = _line_public_base_url(request)
 
     for event in events:
         if event.get("type") != "message" or event["message"].get("type") != "text":
@@ -1042,23 +1189,30 @@ async def line_webhook(request: Request):
                 messages = [{"type": "text", "text": summary}]
                 link_kg = f"{base_url}/api/graph/knowledge?scheme={_url_quote(scheme)}"
                 link_rel = f"{base_url}/api/graph/relationship?scheme={_url_quote(scheme)}"
-                messages.append({
-                    "type": "text",
-                    "text": (
-                        f"📈 點擊查看互動式圖譜：\n"
-                        f"知識圖譜：{link_kg}\n"
-                        f"關係圖：{link_rel}"
-                    ),
-                })
+                messages.append(
+                    _flex_uri_link_bubble(
+                        alt=f"{scheme}：知識圖譜／關係圖連結",
+                        title="📈 互動式圖譜（請點按鈕）",
+                        subtitle=f"方案：{scheme}",
+                        buttons=[
+                            ("開啟「知識圖譜」", link_kg),
+                            ("開啟「關係圖」", link_rel),
+                        ],
+                    )
+                )
                 await _line_reply(reply_token, messages)
             else:
                 summary = _build_ego_summary_text(scheme, child_name)
                 messages = [{"type": "text", "text": summary}]
                 link_ego = f"{base_url}/api/graph/ego?scheme={_url_quote(scheme)}&name={_url_quote(child_name)}"
-                messages.append({
-                    "type": "text",
-                    "text": f"📈 點擊查看 {child_name} 的互動式圖譜：\n{link_ego}",
-                })
+                messages.append(
+                    _flex_uri_link_bubble(
+                        alt=f"{child_name} 的個人圖譜連結",
+                        title=f"📈 {child_name} 的互動式圖譜",
+                        subtitle=f"方案：{scheme}",
+                        buttons=[("開啟個人圖譜", link_ego)],
+                    )
+                )
                 await _line_reply(reply_token, messages)
 
         elif text in ("名單", "查名單", "註冊"):
@@ -1098,20 +1252,25 @@ async def line_webhook(request: Request):
                     )
                     await _line_reply(reply_token, [{"type": "text", "text": msg}])
                 else:
-                    lines = [
-                        f"🎬 {scheme} 追蹤輸出影片（共 {len(vids)} 支，請用瀏覽器開啟連結播放）：",
-                        "",
-                    ]
                     show = vids[:10]
+                    buttons: list[tuple[str, str]] = []
                     for vn in show:
                         u = (
-                            f"{base_url}/api/output/video?scheme={_url_quote(scheme)}"
+                            f"{base_url}/api/output/video-page?scheme={_url_quote(scheme)}"
                             f"&file={_url_quote(vn)}"
                         )
-                        lines.append(f"· {vn}\n  {u}")
+                        btn_label = vn if len(vn) <= 36 else (vn[:33] + "…")
+                        buttons.append((f"播放：{btn_label}", u))
+                    sub = f"共 {len(vids)} 支，以下為前 {len(show)} 支（按鈕在瀏覽器開啟）。"
                     if len(vids) > 10:
-                        lines.append(f"\n… 另有 {len(vids) - 10} 支未列出（可縮短檔名或分批同步）。")
-                    await _line_reply(reply_token, [{"type": "text", "text": "\n".join(lines)}])
+                        sub += f" 另有 {len(vids) - 10} 支未列出。"
+                    flex = _flex_uri_link_bubble(
+                        alt=f"{scheme} 追蹤輸出影片 {len(vids)} 支",
+                        title="🎬 追蹤輸出影片",
+                        subtitle=sub,
+                        buttons=buttons,
+                    )
+                    await _line_reply(reply_token, [flex])
 
         elif text in ("說明", "help", "幫助", "指令"):
             if role == "teacher":

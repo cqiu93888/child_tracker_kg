@@ -413,9 +413,11 @@ async def line_webhook(request: Request):
                     messages.append({
                         "type": "text",
                         "text": (
-                            f"📈 點擊查看互動式圖譜：\n"
-                            f"知識圖譜：{link_kg}\n"
-                            f"關係圖：{link_rel}"
+                            "📈 互動式圖譜（請長按或點選下方完整網址）：\n"
+                            "\n"
+                            f"{link_kg}\n"
+                            "\n"
+                            f"{link_rel}"
                         ),
                     })
                 await _line_reply(reply_token, messages)
@@ -427,7 +429,11 @@ async def line_webhook(request: Request):
                     link_ego = f"{pub}/api/graph/ego?scheme={_url_quote(scheme)}&name={_url_quote(child_name)}"
                     messages.append({
                         "type": "text",
-                        "text": f"📈 點擊查看 {child_name} 的互動式圖譜：\n{link_ego}",
+                        "text": (
+                            f"📈 {child_name} 的互動式圖譜（請長按或點選下方完整網址）：\n"
+                            "\n"
+                            f"{link_ego}"
+                        ),
                     })
                 await _line_reply(reply_token, messages)
 

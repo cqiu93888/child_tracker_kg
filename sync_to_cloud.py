@@ -18,6 +18,10 @@
 加上 --with-videos 可上傳該方案相關目錄內**全部**追蹤輸出影片；若只要某一檔請用 --video output3.mp4（可重複）。
 影片預設以 POST /api/sync/video-chunk 分塊上傳。若雲端尚無該 API（404），總大小在 SYNC_LEGACY_MULTIPART_MAX_MB（預設 48）以下時會自動改試單次 multipart；超過則必須先部署新版。
 預設先找 data/schemes/<方案>/output；若為空，會改找 data/output。
+
+大檔分塊上傳使用單一 httpx.Client 重用連線（Keep-Alive），避免每塊新建 TLS 導致易斷線。
+若仍出現 WinError 10053／連線被中止：改有線網路、暫停 VPN／防毒掃描 HTTPS、或設
+SYNC_UPLOAD_CHUNK_MB=2、SYNC_UPLOAD_CHUNK_TIMEOUT=300 再試。
 """
 
 import argparse
@@ -37,7 +41,7 @@ _CHUNK_PATHS = (
 )
 
 
-def _resolve_video_chunk_url(httpx_mod, base_url: str) -> str:
+def _resolve_video_chunk_url(client, base_url: str) -> str:
     """回傳可用的分塊上傳 POST 基底 URL；若雲端為舊版則回傳空字串。"""
     override = (os.environ.get("CLOUD_SYNC_VIDEO_CHUNK_URL") or "").strip().rstrip("/")
     if override:
@@ -46,7 +50,7 @@ def _resolve_video_chunk_url(httpx_mod, base_url: str) -> str:
     for path in _CHUNK_PATHS:
         url = root + path
         try:
-            g = httpx_mod.get(url, timeout=25.0)
+            g = client.get(url, timeout=25.0)
         except Exception:
             continue
         if g.status_code == 200:
@@ -63,7 +67,7 @@ def _resolve_video_chunk_url(httpx_mod, base_url: str) -> str:
 
 
 def _upload_videos_multipart_once(
-    httpx_mod,
+    client,
     sync_url: str,
     secret: str,
     scheme: str,
@@ -80,7 +84,7 @@ def _upload_videos_multipart_once(
             handles.append(fh)
             file_parts.append(("files", (bn, fh, "video/mp4")))
         data = {"secret": secret, "scheme": scheme}
-        r = httpx_mod.post(sync_url, data=data, files=file_parts, timeout=timeout)
+        r = client.post(sync_url, data=data, files=file_parts, timeout=timeout)
         if r.status_code != 200:
             print(f"[ERROR] multipart 影片同步失敗（HTTP {r.status_code}）")
             print(f"     {r.text}")
@@ -94,10 +98,29 @@ def _upload_videos_multipart_once(
                 pass
 
 
-def _upload_videos_in_chunks(httpx_mod, base_url: str, secret: str, scheme: str, paths: list[str]) -> None:
+def _print_upload_connection_hint() -> None:
+    print(
+        "     [提示] 常見原因：Wi‑Fi 不穩、VPN、防毒掃描 HTTPS、每塊連線過重。"
+        " 可試：有線網路、暫停 VPN/防毒、"
+        "set SYNC_UPLOAD_CHUNK_MB=2 與 set SYNC_UPLOAD_CHUNK_TIMEOUT=300"
+    )
+
+
+def _is_win_connection_aborted(exc: BaseException) -> bool:
+    e: BaseException | None = exc
+    seen: set[int] = set()
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        if isinstance(e, OSError) and getattr(e, "winerror", None) == 10053:
+            return True
+        e = e.__cause__ if e.__cause__ is not None else e.__context__
+    return False
+
+
+def _upload_videos_in_chunks(client, base_url: str, secret: str, scheme: str, paths: list[str]) -> None:
     """優先分塊 POST；雲端無分塊 API 且總檔案不大時改試單次 multipart。"""
     sync_url = f"{base_url.rstrip('/')}/api/sync"
-    chunk_url = _resolve_video_chunk_url(httpx_mod, base_url)
+    chunk_url = _resolve_video_chunk_url(client, base_url)
     total_sz = sum(os.path.getsize(p) for p in paths)
     legacy_max = int(os.environ.get("SYNC_LEGACY_MULTIPART_MAX_MB", "48")) * 1024 * 1024
     force_mp = os.environ.get("SYNC_FORCE_MULTIPART", "").strip() in ("1", "true", "yes")
@@ -123,7 +146,7 @@ def _upload_videos_in_chunks(httpx_mod, base_url: str, secret: str, scheme: str,
             f"[INFO] 改試單次 multipart → {sync_url}（合計 {total_sz / (1024**2):.1f} MB；大檔可能 502）…"
         )
         _upload_videos_multipart_once(
-            httpx_mod, sync_url, secret, scheme, paths, timeout=600.0
+            client, sync_url, secret, scheme, paths, timeout=600.0
         )
         return
 
@@ -135,7 +158,7 @@ def _upload_videos_in_chunks(httpx_mod, base_url: str, secret: str, scheme: str,
         bn = os.path.basename(local_path)
         sz = os.path.getsize(local_path)
         print(f"    · {bn}（約 {sz / (1024 * 1024):.1f} MB）分塊上傳（每塊 {chunk_mb} MB）…")
-        r = httpx_mod.post(
+        r = client.post(
             chunk_url,
             data={
                 "secret": secret,
@@ -157,7 +180,7 @@ def _upload_videos_in_chunks(httpx_mod, base_url: str, secret: str, scheme: str,
                     break
                 n += 1
                 bio = io.BytesIO(buf)
-                r = httpx_mod.post(
+                r = client.post(
                     chunk_url,
                     data={
                         "secret": secret,
@@ -177,7 +200,7 @@ def _upload_videos_in_chunks(httpx_mod, base_url: str, secret: str, scheme: str,
                     print(f"[ERROR] 影片第 {n} 塊 append 失敗（HTTP {r.status_code}）")
                     print(f"     {r.text}")
                     sys.exit(1)
-        r = httpx_mod.post(
+        r = client.post(
             chunk_url,
             data={
                 "secret": secret,
@@ -317,57 +340,69 @@ def main():
         import httpx
 
     sync_url = f"{base_url}/api/sync"
+    chunk_timeout = float(os.environ.get("SYNC_UPLOAD_CHUNK_TIMEOUT", "180.0"))
+    limits = httpx.Limits(max_keepalive_connections=20, max_connections=20)
+    client_timeout = httpx.Timeout(chunk_timeout, connect=60.0, pool=chunk_timeout)
 
-    if has_json_payload:
-        payload = {"secret": secret, "scheme": scheme}
-        if kg_data is not None:
-            payload["knowledge_graph"] = kg_data
-        if names:
-            payload["registered_names"] = names
-        print(f"\n正在上傳圖譜／名單到 {sync_url} ...")
-        try:
-            r = httpx.post(sync_url, json=payload, timeout=60)
-            if r.status_code == 200:
-                result = r.json()
-                print("[OK] 同步成功！")
-                print(f"     方案：{result.get('scheme')}")
-                print(f"     已儲存：{', '.join(result.get('saved', []))}")
-            else:
-                print(f"[ERROR] 同步失敗（HTTP {r.status_code}）")
-                print(f"     {r.text}")
+    with httpx.Client(timeout=client_timeout, limits=limits) as client:
+        if has_json_payload:
+            payload = {"secret": secret, "scheme": scheme}
+            if kg_data is not None:
+                payload["knowledge_graph"] = kg_data
+            if names:
+                payload["registered_names"] = names
+            print(f"\n正在上傳圖譜／名單到 {sync_url} ...")
+            try:
+                r = client.post(sync_url, json=payload, timeout=60.0)
+                if r.status_code == 200:
+                    result = r.json()
+                    print("[OK] 同步成功！")
+                    print(f"     方案：{result.get('scheme')}")
+                    print(f"     已儲存：{', '.join(result.get('saved', []))}")
+                    warns = result.get("warnings") or []
+                    if warns:
+                        print("     [WARN] 雲端回傳警告（可至 Render Logs 查 traceback）：")
+                        for w in warns:
+                            print(f"            · {w}")
+                else:
+                    print(f"[ERROR] 同步失敗（HTTP {r.status_code}）")
+                    print(f"     {r.text}")
+                    sys.exit(1)
+            except httpx.ConnectError:
+                print(f"[ERROR] 無法連線到 {base_url}")
+                print("     請確認 Render 服務已啟動，且網址正確。")
                 sys.exit(1)
-        except httpx.ConnectError:
-            print(f"[ERROR] 無法連線到 {base_url}")
-            print("     請確認 Render 服務已啟動，且網址正確。")
-            sys.exit(1)
-        except Exception as e:
-            print(f"[ERROR] {e}")
-            sys.exit(1)
-        print(f"\n完成！LINE Bot 現在可以使用「{scheme}」方案的圖譜資料。")
-        print(f"Webhook URL：{base_url}/webhook")
-    elif paths:
-        print("[INFO] 本次僅上傳影片（略過圖譜 JSON）。")
+            except Exception as e:
+                print(f"[ERROR] {e}")
+                sys.exit(1)
+            print(f"\n完成！LINE Bot 現在可以使用「{scheme}」方案的圖譜資料。")
+            print(f"Webhook URL：{base_url}/webhook")
+        elif paths:
+            print("[INFO] 本次僅上傳影片（略過圖譜 JSON）。")
 
-    if paths:
-        print(
-            f"\n正在上傳 {len(paths)} 支影片（優先分塊；雲端無分塊時小檔可自動改 multipart）…"
-        )
-        try:
-            _upload_videos_in_chunks(httpx, base_url, secret, scheme, paths)
-            print("[OK] 影片同步完成。")
-        except httpx.ConnectError:
-            print(f"[ERROR] 無法連線到 {base_url}")
-            sys.exit(1)
-        except Exception as e:
-            print(f"[ERROR] 影片同步：{e}")
-            sys.exit(1)
-        print(
-            "\n若仍出現 502：請在 Render 重新部署最新程式，或縮小影片、"
-            "或設定環境變數 SYNC_UPLOAD_CHUNK_MB=4 改小每塊大小。"
-        )
-        if not has_json_payload:
-            print(f"\n完成！Webhook：{base_url}/webhook")
-    elif args.with_videos:
+        if paths:
+            print(
+                f"\n正在上傳 {len(paths)} 支影片（優先分塊；雲端無分塊時小檔可自動改 multipart）…"
+            )
+            try:
+                _upload_videos_in_chunks(client, base_url, secret, scheme, paths)
+                print("[OK] 影片同步完成。")
+            except httpx.ConnectError:
+                print(f"[ERROR] 無法連線到 {base_url}")
+                sys.exit(1)
+            except Exception as e:
+                print(f"[ERROR] 影片同步：{e}")
+                if _is_win_connection_aborted(e):
+                    _print_upload_connection_hint()
+                sys.exit(1)
+            print(
+                "\n若仍出現 502：請在 Render 重新部署最新程式，或縮小影片、"
+                "或設定環境變數 SYNC_UPLOAD_CHUNK_MB=4 改小每塊大小。"
+            )
+            if not has_json_payload:
+                print(f"\n完成！Webhook：{base_url}/webhook")
+
+    if not paths and args.with_videos:
         print("\n[WARN] --with-videos：找不到可上傳的影片（.mp4 / .mov / .webm / .avi / .mkv）。")
         print(f"       請確認檔案在：\n         {out_dir}\n       或 data/output/")
 
