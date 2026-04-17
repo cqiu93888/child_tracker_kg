@@ -1,6 +1,7 @@
-# 雲端版 LINE Bot API 依賴（部署到 Render 使用）
-fastapi>=0.100.0
-uvicorn[standard]>=0.23.0
-httpx>=0.24.0
-networkx>=3.0
-pyvis>=0.3.2
+# 雲端版 LINE Bot API（Render）。鎖版避免 pip 拉到 starlette 1.x 等與 FastAPI 不相容組合，造成 uvicorn 立刻 exit 1。
+fastapi==0.115.6
+starlette==0.41.3
+uvicorn[standard]==0.30.6
+httpx==0.27.2
+networkx==3.3
+pyvis==0.3.2
