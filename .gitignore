@@ -66,6 +66,9 @@ data/schemes/*/graph/
 *.pth
 *.pt
 
+# 本機跑 api_cloud 時預設寫入的雲端資料目錄（勿提交）
+cloud_data/
+
 # ===== .gitkeep 不排除 =====
 !.gitkeep
 !data/.gitkeep
