@@ -507,9 +507,13 @@ def _draw_relationship_graph(
 
     focal = focal_node_id or kg_data.get("focal_id")
     focal_s = str(focal) if focal is not None else None
+    # 不可使用 pyvis 預設 cdn_resources="local"：產出之 <script src="lib/..."> 為相對路徑，
+    # 經 Render 以 /api/graph/knowledge 等網址提供時，瀏覽器會向 /api/graph/lib/... 取檔而 404，
+    # 圖譜整片無法互動。「remote」會內嵌 utils 並從 CDN 載入 vis-network。
     net = Network(
         height=GRAPH_HEIGHT, width="100%",
         bgcolor="#fafafa", font_color="#333", directed=False,
+        cdn_resources="remote",
     )
     sl = PHYSICS_SPRING_LENGTH
     rep = PHYSICS_REPULSION
@@ -608,7 +612,7 @@ app = FastAPI(
 )
 
 # 部署驗證：GET / 會回傳 deploy_mark。若線上與此字串不符，代表 Render 未拉到最新程式。
-API_CLOUD_DEPLOY_MARK = "py311-2026-04-18-v20-mp4-browser-hint"
+API_CLOUD_DEPLOY_MARK = "py311-2026-04-18-v20-pyvis-cdn-remote"
 
 
 def _get_base_url(request: Request) -> str:
@@ -920,9 +924,18 @@ def get_graph_data(scheme: str = Query("", description="方案名稱")):
          summary="取得關係圖 HTML")
 def get_relationship_html(scheme: str = Query("", description="方案名稱")):
     scheme = scheme or _line_default_scheme()
-    p = os.path.join(_graph_dir(scheme), "relationship_graph.html")
+    gd = _graph_dir(scheme)
+    p = os.path.join(gd, "relationship_graph.html")
     if not os.path.isfile(p):
-        raise HTTPException(404, "尚未同步關係圖。")
+        kg = _load_kg(scheme)
+        if kg is None:
+            raise HTTPException(404, "尚未同步關係圖（無圖譜 JSON 可重建）。")
+        try:
+            _draw_relationship_graph(
+                kg, p, title=f"幼兒關係圖（{scheme}）",
+            )
+        except Exception as ex:
+            raise HTTPException(500, f"關係圖重建失敗：{ex}") from ex
     with open(p, "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
@@ -931,9 +944,18 @@ def get_relationship_html(scheme: str = Query("", description="方案名稱")):
          summary="取得知識圖譜 HTML")
 def get_knowledge_html(scheme: str = Query("", description="方案名稱")):
     scheme = scheme or _line_default_scheme()
-    p = os.path.join(_graph_dir(scheme), "knowledge_graph.html")
+    gd = _graph_dir(scheme)
+    p = os.path.join(gd, "knowledge_graph.html")
     if not os.path.isfile(p):
-        raise HTTPException(404, "尚未同步知識圖譜。")
+        kg = _load_kg(scheme)
+        if kg is None:
+            raise HTTPException(404, "尚未同步知識圖譜（無圖譜 JSON 可重建）。")
+        try:
+            _draw_relationship_graph(
+                kg, p, title=f"幼兒知識圖譜（{scheme}）",
+            )
+        except Exception as ex:
+            raise HTTPException(500, f"知識圖譜 HTML 重建失敗：{ex}") from ex
     with open(p, "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
@@ -1085,13 +1107,6 @@ def get_output_video_page(
     probe_esc = html.escape(probe, quote=True)
     probe_json = json.dumps(inf, ensure_ascii=False).replace("<", "\\u003c")
     bad_banner = ""
-    play_hint = (inf.get("playback_hint_zh") or "").strip()
-    if play_hint and inf.get("looks_like_mp4"):
-        ph_esc = html.escape(play_hint, quote=True)
-        bad_banner += (
-            f'<p style="margin:10px 12px;padding:10px;background:#33691e;border-radius:8px;'
-            f'font-size:14px;line-height:1.55;">{ph_esc}</p>'
-        )
     if not inf["looks_like_mp4"]:
         hint = html.escape(inf.get("hint") or "檔案標頭異常", quote=True)
         bad_banner = (
@@ -1118,8 +1133,7 @@ def get_output_video_page(
 </p>
 <script type="application/json" id="probe-data">{probe_json}</script>
 <p style="margin:8px 12px;font-size:12px;color:#888;word-break:break-all;">
-  <strong>可下載但線上不能播</strong>：多半是 <strong>MP4 內為 mp4v（MPEG-4 Part 2）</strong> 等非 H.264，VLC 可播但 Chrome／多數手機內建播放器不支援。
-  請在本機重跑追蹤時使用預設 <code>VIDEO_OUTPUT_FOURCC=auto</code>（會優先 avc1/H264），或轉檔 <code>ffmpeg -i 舊.mp4 -c:v libx264 -movflags +faststart 新.mp4</code> 後再 <code>sync_to_cloud</code>。
+  若<strong>電腦與手機</strong>皆無法播放：多為<strong>檔損／非 MP4 實體</strong>或編碼器寫壞。請下載後用 VLC 測；本機重跑追蹤並可設 <code>VIDEO_OUTPUT_FOURCC=mp4v</code>。
 </p>
 <p style="margin:8px 12px;"><a href="{dl_esc}" style="color:#90caf9;">下載此影片（download=1）</a></p>
 <p id="v-err" style="margin:8px 12px;font-size:13px;color:#ffb74d;"></p>

@@ -228,12 +228,14 @@ def draw_relationship_graph(
 
     focal = focal_node_id or kg_data.get("focal_id")
 
+    # 與雲端 api_cloud 一致：避免預設 local 造成 HTML 內相對路徑 lib/… 在子目錄開啟時 404。
     net = Network(
         height=RELATIONSHIP_GRAPH_HEIGHT,
         width="100%",
         bgcolor="#fafafa",
         font_color="#333",
         directed=False,
+        cdn_resources="remote",
     )
     # 節點散開：forceAtlas2Based + 長彈簧 + 斥力；避免全擠成一團
     try:
