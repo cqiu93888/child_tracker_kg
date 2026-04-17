@@ -15,7 +15,7 @@ from urllib.parse import quote as _url_quote
 
 import httpx
 from fastapi import FastAPI, File, Form, Query, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 # ---------------------------------------------------------------------------
@@ -547,7 +547,7 @@ app = FastAPI(
 )
 
 # 部署驗證：GET / 會回傳 deploy_mark。若線上與此字串不符，代表 Render 未拉到最新程式。
-API_CLOUD_DEPLOY_MARK = "py311-2026-04-17-v8-multipart"
+API_CLOUD_DEPLOY_MARK = "py311-2026-04-17-v9-head-root"
 
 
 def _get_base_url(request: Request) -> str:
@@ -1149,6 +1149,11 @@ async def line_webhook(request: Request):
 # ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
+
+@app.head("/", summary="健康檢查 HEAD（Render 等平台會對 / 送 HEAD）")
+def health_head():
+    return Response(status_code=200)
+
 
 @app.get("/", summary="健康檢查")
 def health():
