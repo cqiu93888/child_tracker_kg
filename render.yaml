@@ -18,4 +18,4 @@ services:
       - key: LINE_DEFAULT_SCHEME
         value: 甲班
       - key: PYTHON_VERSION
-        value: "3.11.9"
+        value: "3.11.11"
