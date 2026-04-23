@@ -14,6 +14,9 @@ import matplotlib.pyplot as plt
 
 HERE = pathlib.Path(__file__).resolve().parent
 
+# 印在圖角，方便確認已重新輸出（與 Word 內嵌快取無關）。
+FIGURE_VERSION = "2026-04-18-v2"
+
 for fn in ("Microsoft JhengHei", "Microsoft YaHei", "SimHei", "PingFang TC"):
     try:
         plt.rcParams["font.sans-serif"] = [fn]
@@ -96,7 +99,7 @@ def draw_architecture():
     ax.set_ylim(0, fig_h)
     ax.axis("off")
     ax.set_title(
-        "child_tracker_kg · 技術架構總覽（區塊圖）",
+        f"child_tracker_kg · 技術架構總覽（區塊圖）　〔{FIGURE_VERSION}〕",
         fontsize=14,
         fontweight="bold",
         pad=10,
@@ -278,19 +281,37 @@ def draw_architecture():
         (LM + 0.4, yr),
         2.5,
         0.88,
-        "knowledge_graph\nNetworkX → knowledge_graph.json\n（目錄 data/graph）",
+        "knowledge_graph\nNetworkX → knowledge_graph.json\n（data/schemes/<方案>/graph/）",
         "#FFFFFF",
         "#01579B",
         7.2,
     )
     _box(ax, (LM + 3.05, yr), 2.35, 0.88, "personality\n互動相對分位（proxy）", "#FFFFFF", "#01579B", 7.6)
-    _box(ax, (LM + 5.55, yr), W - 5.9, 0.88, "relationship_graph\npyvis → data/graph/*.html", "#FFFFFF", "#01579B", 7.4)
+    _box(
+        ax,
+        (LM + 5.55, yr),
+        W - 5.9,
+        0.88,
+        "relationship_graph\npyvis → …/graph/*.html\n（同上方案目錄）",
+        "#FFFFFF",
+        "#01579B",
+        7.0,
+    )
 
     # ⑦ 視覺化
     y_hi_vz, y_lo_vz = zone(y_lo_gr - BAND_SEP, 1.28, "視覺化（靜態 HTML，瀏覽器離線開啟）", "#FFECB3", "#F57C00")
     _arrow_down(ax, FLOW_X, y_lo_gr - 0.05, y_hi_vz + 0.02, "#6D6D6D", lw=1.0)
     yr = y_lo_vz + 0.22
-    _box(ax, (LM + 0.4, yr), 2.65, 0.74, "data/graph/\nrelationship_graph.html\nvis-network", "#FFFFFF", "#E65100", 7.8)
+    _box(
+        ax,
+        (LM + 0.4, yr),
+        2.65,
+        0.74,
+        "…/graph/\nrelationship_graph.html\nvis-network",
+        "#FFFFFF",
+        "#E65100",
+        7.8,
+    )
     _box(ax, (LM + 3.2, yr), 3.2, 0.74, "Chart.js（注入）\n節點 hover 互動時間軸", "#FFFFFF", "#E65100", 7.9)
     _box(ax, (LM + 6.55, yr), W - 6.9, 0.74, "無後端伺服器", "#FAFAFA", "#78909C", 9)
 
@@ -302,6 +323,17 @@ def draw_architecture():
         ha="center",
         fontsize=8,
         color="#616161",
+    )
+    ax.text(
+        LM + W - 0.05,
+        fig_h - 0.35,
+        f"圖面版本\n{FIGURE_VERSION}",
+        ha="right",
+        va="top",
+        fontsize=8.5,
+        color="#B71C1C",
+        fontweight="bold",
+        linespacing=1.05,
     )
 
     out = HERE / "architecture_overview.png"
@@ -317,7 +349,7 @@ def draw_sequence():
     ax.set_ylim(0, 10)
     ax.axis("off")
     ax.set_title(
-        "資料流與操作順序（示意）",
+        f"資料流與操作順序（示意）　〔{FIGURE_VERSION}〕",
         fontsize=15,
         fontweight="bold",
         pad=12,
@@ -385,11 +417,23 @@ def draw_sequence():
     ax.text(
         6,
         0.55,
-        "※ YOLO 預設：main.py 以 subprocess 執行 run_yolo_isolated.py。註冊用 face_registry；處理影片用 yolo_tracker 或 video_tracker（擇一）。",
+        "※ YOLO 預設：main.py 以 subprocess 執行 run_yolo_isolated.py。註冊用 face_registry；"
+        "處理影片用 yolo_tracker 或 video_tracker（擇一）。互動／圖譜檔在 data/schemes/<方案>/ 下。",
         ha="center",
         fontsize=7.5,
         style="italic",
         color="#616161",
+    )
+    ax.text(
+        11.85,
+        9.75,
+        f"圖面版本\n{FIGURE_VERSION}",
+        ha="right",
+        va="top",
+        fontsize=8.5,
+        color="#B71C1C",
+        fontweight="bold",
+        linespacing=1.05,
     )
 
     out = HERE / "dataflow_sequence.png"
