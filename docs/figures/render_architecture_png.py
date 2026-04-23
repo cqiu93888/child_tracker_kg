@@ -132,7 +132,16 @@ def draw_architecture():
     h1 = 1.42
     y_hi1, y_lo1 = zone(y_hi1, h1, "輸入", "#FFE0B2", "#E65100")
     y_in = y_lo1 + 0.38
-    _box(ax, (LM + 0.5, y_in), 3.1, 0.7, "註冊照片\n(data/registered)", "#FFFFFF", "#BF360C", 8.8)
+    _box(
+        ax,
+        (LM + 0.5, y_in),
+        3.1,
+        0.7,
+        "註冊照片\n（data/schemes/<方案>/registered）",
+        "#FFFFFF",
+        "#BF360C",
+        8.4,
+    )
     _box(ax, (LM + 4.5, y_in), 3.1, 0.7, "影片檔\nMP4（--video）", "#FFFFFF", "#BF360C", 8.8)
 
     y_hi2 = y_lo1 - SEP_ZONE
@@ -176,7 +185,7 @@ def draw_architecture():
         (yolo_l, y_tr),
         yolo_w,
         bh_tr,
-        "yolo_tracker\n人體偵測 + 臉部比對 + 互動統計\n（YOLOv8 + face_recognition）",
+        "yolo_tracker\n人體偵測＋臉部比對＋互動統計\n（YOLOv8；臉部：dlib／InsightFace）",
         "#FFFFFF",
         "#6A1B9A",
         8.0,
@@ -241,7 +250,7 @@ def draw_architecture():
         (LM + 1.15, y_box),
         W - 2.3,
         box_h,
-        "寫入 data/interactions.json\n（同框、靠近、可選 interaction_timeline）",
+        "寫入 data/schemes/<方案>/interactions.json\n（與 --scheme 一致；同框、靠近、可選 interaction_timeline）",
         "#E3F2FD",
         "#1565C0",
         8.3,
@@ -253,8 +262,8 @@ def draw_architecture():
     ax.text(
         LM + 0.15,
         y_hi_st - 0.52,
-        "data/registered/、data/output/output.mp4、data/interactions.json、\n"
-        "data/graph/knowledge_graph.json、data/graph/*.html（含 ego/）",
+        "data/schemes/<方案>/registered/、…/output/*.mp4、…/interactions.json、\n"
+        "…/graph/knowledge_graph.json、…/graph/*.html（含 ego/）",
         fontsize=8.35,
         color="#37474F",
         va="top",
@@ -289,7 +298,7 @@ def draw_architecture():
     ax.text(
         cx,
         max(0.42, foot_y),
-        "※ 入口：main.py ；專案中路徑以 data/ 為根目錄。",
+        "※ 入口：main.py。多方案時以 data/schemes/<方案>/ 為根；雲端可選 sync_to_cloud → Render（api_cloud／LINE）。",
         ha="center",
         fontsize=8,
         color="#616161",
@@ -318,7 +327,7 @@ def draw_sequence():
         (1.15, "使用者"),
         (2.75, "main.py"),
         (4.35, "註冊 / 追蹤\n模組"),
-        (6.05, "interactions.json"),
+        (6.05, "interactions.json\n（各方案子目錄內）"),
         (7.85, "knowledge_graph\n+ pyvis"),
         (10.15, "HTML"),
     ]
