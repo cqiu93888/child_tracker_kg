@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -64,6 +65,16 @@ def _to_tw(text: str) -> str:
     return zhconv.convert(text, "zh-tw")
 
 
+def _embedded_images_match(docx: Path, arch: Path, seq: Path) -> bool:
+    """確認 docx 內 word/media/image1/2.png 與專案產出之 PNG 位元組一致。"""
+    want1 = hashlib.sha256(arch.read_bytes()).digest()
+    want2 = hashlib.sha256(seq.read_bytes()).digest()
+    with zipfile.ZipFile(docx, "r") as z:
+        got1 = hashlib.sha256(z.read("word/media/image1.png")).digest()
+        got2 = hashlib.sha256(z.read("word/media/image2.png")).digest()
+    return got1 == want1 and got2 == want2
+
+
 def _apply_tw_doc(doc: Document) -> None:
     for p in doc.paragraphs:
         if p.text.strip():
@@ -113,7 +124,15 @@ def main() -> int:
 
     try:
         shutil.copy2(out_buf, target)
+        if not _embedded_images_match(target, arch, seq):
+            print(
+                "[錯誤] 寫入後內嵌圖雜湊仍與 docs/figures 不符（常見：OneDrive 還原舊版、或檔案仍被鎖）。",
+                file=sys.stderr,
+            )
+            print("       請暫停編輯該檔、關閉 Word、待 OneDrive 同步完成後再執行本腳本。", file=sys.stderr)
+            return 3
         print("已更新:", target)
+        print("[確認] 內嵌圖與 architecture_overview.png / dataflow_sequence.png 一致。")
     except OSError as e:
         fallback = Path(os.environ["TEMP"]) / "tech2_docx_updated.docx"
         shutil.copy2(out_buf, fallback)
