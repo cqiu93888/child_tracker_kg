@@ -3,7 +3,7 @@
 部分 Windows／pip 版 OpenCV 會出現 isOpened()==True 卻寫出損壞或極小的檔案，
 導致電腦與手機皆無法播放。auto 模式會用暫存檔驗證後再建立正式 VideoWriter。
 
-環境變數 VIDEO_OUTPUT_FOURCC：auto（預設，優先 avc1/H264 以利瀏覽器線上播放）、或四字元如 avc1、H264、mp4v（mp4v 常導致僅 VLC 可播）。
+環境變數 VIDEO_OUTPUT_FOURCC：auto（預設）、或四字元如 mp4v、avc1、H264。
 """
 
 from __future__ import annotations
@@ -66,8 +66,8 @@ def create_cv_video_writer(
         if out.isOpened():
             return out
 
-    # 探測全失敗時退回舊行為（僅 isOpened）；仍優先 avc1/H264 以利瀏覽器內嵌播放
-    for tag in ("avc1", "H264", "X264", "mp4v"):
+    # 探測全失敗時退回舊行為（僅 isOpened），避免極端環境完全無法輸出
+    for tag in ("mp4v", "avc1", "H264", "X264"):
         fcc = cv2.VideoWriter_fourcc(*tag)
         out = cv2.VideoWriter(output_path, fcc, fps_f, (w, h))
         if out.isOpened():

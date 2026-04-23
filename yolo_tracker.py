@@ -22,6 +22,7 @@ except ImportError:
 
 import face_recognition
 
+from cv_video_writer import create_cv_video_writer
 from config import (
     ensure_dirs,
     output_dir,
@@ -579,8 +580,7 @@ def process_video(
         start_frame = int(start_seconds * fps)
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         total_frames = max(0, total_frames - start_frame)
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
+    out = create_cv_video_writer(output_path, fps, (w, h))
 
     ms = (model_size or YOLO_PERSON_MODEL_SIZE or "n").strip().lower()
     if ms not in ("n", "s", "m", "l", "x"):

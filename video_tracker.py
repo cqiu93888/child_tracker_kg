@@ -24,6 +24,7 @@ from face_registry import get_registry_bundle, match_face_encoding
 from appearance_features import signature_from_face_box
 import face_engine as _fe
 from draw_text_cn import draw_label_cn
+from cv_video_writer import create_cv_video_writer
 
 
 # OpenCV 追蹤器 API 依版本可能在 cv2 或 cv2.legacy
@@ -147,8 +148,7 @@ def process_video(
         start_frame = int(start_seconds * fps)
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         total_frames = max(0, total_frames - start_frame)
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
+    out = create_cv_video_writer(output_path, fps, (w, h))
 
     # 互動記錄：同框 (name1, name2) -> 次數；靠近 (name1, name2) -> 次數
     cooccurrence = defaultdict(int)  # (n1, n2) 且 n1 < n2
